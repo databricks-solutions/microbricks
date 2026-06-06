@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Project-local Claude Code configuration. Skills under .claude/skills/ are auto-discovered.",
+  "permissions": {
+    "allow": [
+      "Bash(databricks bundle validate:*)",
+      "Bash(databricks bundle summary:*)",
+      "Bash(databricks postgres list-projects:*)",
+      "Bash(databricks postgres list-branches:*)",
+      "Bash(databricks postgres list-endpoints:*)",
+      "Bash(databricks postgres get-branch:*)",
+      "Bash(databricks postgres get-endpoint:*)",
+      "Bash(databricks current-user me:*)",
+      "Bash(databricks apps list:*)",
+      "Bash(apx --version)",
+      "Bash(apx dev check:*)",
+      "Bash(apx dev status:*)",
+      "Bash(apx dev logs:*)",
+      "Bash(uv --version)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run alembic check:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh repo view:*)",
+      "Bash(actionlint:*)"
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+resources:
+  apps:
+    hc_portal_app:
+      name: hc-portal-${bundle.target}${var.app_name_suffix}
+      description: "Healthcare clinician portal — frontend + BFF."
+      source_code_path: ../frontend/hc-portal
+
+      # No `config.env` block by default: the BFF composes every downstream
+      # URL at runtime from its own platform-injected `DATABRICKS_APP_URL`.
+      # Sibling services follow the `<svc>-<target>-<wsid>...` pattern, so
+      # peeling off our own `hc-portal` prefix yields the shared tail. See
+      # `frontend/hc-portal/src/hc_portal/clients/_base.py`. This sidesteps
+      # two DAB asymmetries:
+      #   - `${resources.apps.<key>.url}` does NOT resolve at bundle-deploy
+      #     time (`bundle validate -o json` shows `url=null`).
+      #   - `bundle deploy` syncs source files but does NOT push
+      #     `config.env` to the running App spec; you'd need a separate
+      #     `apps update` call to plumb env vars through.
+      # `${resources.apps.<key>.name}` DOES resolve, and we still need it
+      # below for the `CAN_USE` ACLs.
+      #
+      # To override one or more service URLs (PR preview, alternate
+      # region, fan-out across workspaces), add a `config.env` block here
+      # with the literal URL. The BFF reads `<SVC>_SVC_URL` and prefers
+      # it over the runtime-derived default. Example:
+      #
+      #   config:
+      #     env:
+      #       - name: PATIENT_SVC_URL
+      #         value: "https://patient-pr-1234-7474643727449861.aws.databricksapps.com"
+      #
+      # The same override can also live in `frontend/hc-portal/app.yml`
+      # (commented-out example there). Bundle `config.env` overrides
+      # `app.yml` env on a per-key basis.
+
+      # The BFF doesn't talk to a DB itself — only the six backend services
+      # do. It does need user-OBO so it can forward `X-Forwarded-Access-Token`
+      # to each downstream service unmodified (see hc-bff-pattern). Same scopes
+      # as the services so OBO traversal stays trust-preserving.
+      # OBO scopes ONLY the portal needs (the six backend services declare no
+      # scopes — they're token-receivers, not token-requesters):
+      #   - `sql`      → query Lakehouse warehouses (saved configs, joins
+      #                  across UC, dashboards-style reads).
+      #   - `postgres` → mint Lakebase OAuth credentials directly from the
+      #                  portal if a route ever needs to connect to a service's
+      #                  database without going through the service.
+      # `iam.*` scopes are platform defaults and are NOT user-grantable.
+      user_api_scopes:
+        - "sql"
+        - "postgres"
+
+      # Declaring each backend app as an `app` resource:
+      #   1. Records the dependency in the bundle so deploys order correctly
+      #      (services first, portal last).
+      #   2. Grants the portal's service principal `CAN_USE` on each backend
+      #      app — the platform ACL Apps uses to gate cross-app traffic.
+      # The URLs themselves are wired in `frontend/hc-portal/app.yml` via
+      # `value: ${resources.apps.<svc>_app.url}` (DAB-time substitution),
+      # because Apps' `valueFrom: <key>` resolves to the app *name*, not URL.
+      resources:
+        - name: patient_app
+          description: "Patient service backend."
+          app:
+            name: ${resources.apps.patient_app.name}
+            permission: CAN_USE
+        - name: provider_app
+          description: "Provider service backend."
+          app:
+            name: ${resources.apps.provider_app.name}
+            permission: CAN_USE
+        - name: appointment_app
+          description: "Appointment service backend."
+          app:
+            name: ${resources.apps.appointment_app.name}
+            permission: CAN_USE
+        - name: lab_app
+          description: "Lab service backend."
+          app:
+            name: ${resources.apps.lab_app.name}
+            permission: CAN_USE
+        - name: prescription_app
+          description: "Prescription service backend."
+          app:
+            name: ${resources.apps.prescription_app.name}
+            permission: CAN_USE
+        - name: billing_app
+          description: "Billing service backend."
+          app:
+            name: ${resources.apps.billing_app.name}
+            permission: CAN_USE

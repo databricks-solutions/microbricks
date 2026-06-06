@@ -1,0 +1,33 @@
+[project]
+name = "microbricks"
+version = "0.0.0"
+description = "Reference architecture: 6 backend services + BFF on Databricks Apps + Lakebase."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.uv]
+# Root is a non-package uv project: it exists only to drive the cross-service
+# test suite under tests/seeds/, which exercises scripts/seeds/_common.py via
+# sys.path injection — no service imports happen here.
+#
+# Each services/<svc>/ and frontend/hc-portal/ is its OWN standalone uv project
+# with its own uv.lock (Databricks Apps detects pyproject.toml + uv.lock and
+# runs `uv sync` at deploy — see
+# https://docs.databricks.com/aws/en/dev-tools/databricks-apps/dependencies).
+# Do NOT reintroduce a [tool.uv.workspace] block: workspace members share a
+# single root lock, which is exactly the coupling we removed.
+package = false
+
+# Root-level dev deps drive the cross-cutting test suites under tests/ —
+# specifically tests/seeds/, which exercises scripts/seeds/_common.py without
+# requiring any service to be installed. Per-service tests still live under
+# services/<svc>/tests/ and use that service's own dev dependencies.
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "psycopg[binary]>=3.2.11",
+    "databricks-sdk>=0.74.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

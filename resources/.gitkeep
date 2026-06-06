@@ -1,0 +1,6 @@
+# DAB resource includes
+
+This directory will hold one `<svc>.yml` per service plus `hc-portal.yml` and `shared.yml`.
+Each file declares the service's Databricks App + Lakebase database resource.
+
+See `.claude/skills/hc-dab-deployment/SKILL.md` for the shape.

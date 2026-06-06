@@ -1,0 +1,13 @@
+# Services placeholder
+
+Each subdirectory here will be a backend microservice (one APX project per service).
+See `.claude/skills/hc-microservice-scaffold/SKILL.md` for how to add one.
+
+Planned services (from `HEALTHCARE_DATA_MODEL.md`):
+
+- `patient/` — patient demographics + consent
+- `provider/` — clinicians + organizations
+- `appointment/` — visits + slots
+- `lab/` — lab orders + results
+- `prescription/` — Rx + refills
+- `billing/` — invoices + claims + payments

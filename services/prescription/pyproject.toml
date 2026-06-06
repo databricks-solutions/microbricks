@@ -1,0 +1,79 @@
+[project]
+name = "prescription-svc"
+dynamic = ["version"]
+description = "System of record for active and historical prescriptions and refill workflow."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.74.0",
+    "psycopg[binary,pool]>=3.2.11",
+    "alembic>=1.13.0",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.12",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.apx.metadata]
+app-name = "prescription"
+app-slug = "prescription"
+app-entrypoint = "prescription.app:app"
+api-prefix = "/api/v1"
+metadata-path = "src/prescription/_metadata.py"
+
+[tool.uv]
+# Standalone (non-workspace) uv project. Databricks Apps detects this
+# pyproject.toml + uv.lock and runs `uv sync` at deploy time:
+#   https://docs.databricks.com/aws/en/dev-tools/databricks-apps/dependencies
+#
+# `package = false` skips installing the local source as a wheel — the runtime
+# imports `prescription.app:app` directly from `src/` via PYTHONPATH=src (set in
+# app.yaml). The [build-system] / [tool.hatch.*] blocks below stay so that
+# `uv build` still works for ad-hoc wheel builds, but they are inert during
+# `uv sync`.
+package = false
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.version]
+path = "src/prescription/_version.py"
+template = '''
+version = "{version}"
+'''
+
+[tool.hatch.build]
+artifacts = ["src/prescription/__dist__", "src/prescription/_metadata.py"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prescription"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/prescription"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# `package = false` intentionally skips installing the local source as a
+# wheel, so `from prescription.* import ...` only resolves if `src/` is on sys.path.
+# The Apps runtime sets PYTHONPATH=src in app.yaml; pytest needs the same
+# hint here so a plain `uv run pytest` works locally and in CI.
+pythonpath = ["src"]
+markers = [
+    "integration: integration tests requiring a live Lakebase endpoint",
+]

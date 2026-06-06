@@ -1,0 +1,125 @@
+name: deploy-prod
+
+# Production deploy. Triggered ONLY by pushing a `v*` tag on `main`.
+# The `prod` GitHub environment has required reviewers configured (Phase 0
+# of ROADMAP.md), which produces the manual-approval gate.
+#
+# Hard rules:
+#   - Tag must be on `main`. We refuse to deploy a tag from any other branch
+#     because that would let a feature branch sneak straight to prod.
+#   - Migrations run before bundle deploy. Same ordering as dev/test — see
+#     the comment in deploy-dev.yml.
+#   - Rollback is "redeploy the previous tag"; documented in
+#     docs/runbooks/prod-rollback.md (deferred — Phase 8).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  DATABRICKS_CLI_VERSION: "0.295.0"
+
+jobs:
+  verify-tag-on-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # We need the full history so `git merge-base` can confirm the tag
+          # is reachable from main. Default `fetch-depth: 1` would lie.
+          fetch-depth: 0
+
+      - name: Confirm tag is on main
+        run: |
+          set -euo pipefail
+          # The tag pointer is github.sha at this point.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on main."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME is on main — OK to deploy."
+
+  deploy:
+    needs: verify-tag-on-main
+    runs-on: ubuntu-latest
+    # The `prod` environment carries the manual-approval gate — every job
+    # bound to `environment: prod` waits for a reviewer named in repo
+    # Settings -> Environments -> prod.
+    environment:
+      name: prod
+      url: https://hc-portal-prod.databricksapps.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write hc-prod profile to ~/.databrickscfg
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_PROD }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        # See pr-validate.yml for the rationale.
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [hc-prod]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p hc-prod
+
+      - name: Ensure Lakebase projects exist (idempotent)
+        # See deploy-dev.yml for rationale.
+        run: |
+          for svc in patient provider appointment lab prescription billing; do
+            ./scripts/lakebase-project-up.sh "$svc" prod hc-prod
+          done
+
+      - name: Run migrations (production branches, all six services)
+        run: |
+          set -euo pipefail
+          export LOCAL_DEV_TOKEN=$(databricks auth token -p hc-prod | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          export PGUSER=$(databricks current-user me -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+          for svc in patient provider appointment lab prescription billing; do
+            echo "→ Migrating $svc against prod/production"
+            cd "services/$svc"
+            ENDPOINT="projects/$svc-prod/branches/production/endpoints/primary"
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            export PGHOST="$HOST"
+            export PGPORT=5432
+            export PGDATABASE=databricks_postgres
+            export PGSSLMODE=require
+            export ENDPOINT_NAME="$ENDPOINT"
+            uv sync --all-groups
+            uv run alembic upgrade head
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: bundle deploy
+        run: databricks bundle deploy -t prod
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          for app in patient provider appointment lab prescription billing hc-portal; do
+            URL=$(databricks apps get "$app-prod" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            echo "Smoke: $app -> $URL"
+            curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
+          done

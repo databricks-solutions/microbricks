@@ -1,0 +1,45 @@
+# Lakebase projects (`postgres_projects`) are deliberately NOT in this file.
+# They live outside the bundle entirely: `bundle deploy`/`bundle destroy`
+# only manage the app, never the underlying project. This means a per-PR
+# preview deploy/destroy can never accidentally touch the shared project
+# (which is what happened on 2026-06-06; see `dev-bundle-destroy-disaster`
+# memory note). Project lifecycle is managed via:
+#   scripts/lakebase-project-up.sh   <service> <env>
+#   scripts/lakebase-project-down.sh <service> <env>
+# Run once per env at bootstrap; `ci-local.sh deploy <env>` runs them
+# automatically before `bundle deploy`.
+resources:
+  apps:
+    patient_app:
+      # `${var.app_name_suffix}` is empty for canonical dev/test/prod deploys
+      # and `-feat-<slug>` for per-PR preview deploys. See databricks.yml.
+      name: patient-${bundle.target}${var.app_name_suffix}
+      description: "System of record for patient demographics, addresses, and consent."
+      source_code_path: ../services/patient
+
+      # OBO scope the user's forwarded token (X-Forwarded-Access-Token) must
+      # carry. The service uses that token to mint Lakebase credentials per
+      # request via `databricks_auth.generate_database_credential`, which
+      # requires the `postgres` scope. `iam.*` are platform defaults.
+      user_api_scopes:
+        - "postgres"
+
+      # App resources. Declaring the postgres resource:
+      #   1. Auto-injects PGHOST / PGUSER / PGDATABASE / PGPORT / PGSSLMODE /
+      #      PGAPPNAME at runtime (Databricks Apps platform contract — see
+      #      docs.databricks.com/aws/en/dev-tools/databricks-apps/lakebase).
+      #   2. Creates a Postgres role for this app's service principal with
+      #      CONNECT + CREATE on `databricks_postgres` so Alembic migrations
+      #      can run.
+      # The string `name:` (here `patient_db`) is also the `valueFrom:` key for
+      # additional env vars in app.yaml — we use it to expose ENDPOINT_NAME.
+      resources:
+        - name: patient_db
+          description: "Patient service Lakebase Autoscale project."
+          postgres:
+            # branch resolves to `production` for test/prod targets and to the
+            # current git branch's slug (`feat-<slug>`) for per-feature dev
+            # deploys. See `lakebase_branch` in databricks.yml.
+            branch: projects/patient-${bundle.target}/branches/${var.lakebase_branch}
+            database: projects/patient-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            permission: CAN_CONNECT_AND_CREATE

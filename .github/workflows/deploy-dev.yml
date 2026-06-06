@@ -1,0 +1,140 @@
+name: deploy-dev
+
+# Trunk-dev deploy. Triggered on every push to `develop` (PRs land here via
+# squash-merge). Deploys the canonical (suffix-less) bundle:
+#   patient-dev / provider-dev / ... / hc-portal-dev
+# All six service apps bind to their `production` Lakebase branch (the var
+# default), which is the long-lived dev branch — separate from the per-PR
+# `feat-<slug>` branches owned by pr-validate.yml.
+#
+# Migrations run BEFORE bundle deploy: a deploy of a new app version that
+# expects a column the DB doesn't yet have produces a brief outage; the
+# reverse is fine because old code ignores the new column.
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+# A second push to develop while we're still deploying queues behind us
+# — we never want two `deploy-dev` runs racing each other.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  DATABRICKS_CLI_VERSION: "0.295.0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [patient, provider, appointment, lab, prescription, billing]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - name: uv sync
+        working-directory: services/${{ matrix.service }}
+        run: uv sync --all-groups
+      - name: Unit tests
+        working-directory: services/${{ matrix.service }}
+        run: uv run pytest -m 'not integration' -q
+
+  test-portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - name: uv sync (BFF)
+        working-directory: frontend/hc-portal
+        run: uv sync --all-groups
+      - name: BFF unit tests
+        working-directory: frontend/hc-portal
+        run: uv run pytest -m 'not integration' -q
+
+  deploy:
+    needs: [test, test-portal]
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://hc-portal-dev.databricksapps.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write hc-dev profile to ~/.databrickscfg
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        # See pr-validate.yml for the rationale.
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [hc-dev]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p hc-dev
+
+      - name: Ensure Lakebase projects exist (idempotent)
+        # Project lifecycle is OUTSIDE the bundle (see resources/patient.yml
+        # for the rationale). The bundle's app->postgres references will
+        # 404 on first deploy if the project doesn't exist yet.
+        run: |
+          for svc in patient provider appointment lab prescription billing; do
+            ./scripts/lakebase-project-up.sh "$svc" dev hc-dev
+          done
+
+      - name: Run migrations (production branches, all six services)
+        # Same alembic-driven flow as pr-validate; the only difference is the
+        # endpoint (`production` vs `feat-<slug>`) and the matrix scope (we
+        # always run all six on trunk-dev because there's no per-PR scoping).
+        run: |
+          set -euo pipefail
+          export LOCAL_DEV_TOKEN=$(databricks auth token -p hc-dev | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          export PGUSER=$(databricks current-user me -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+          for svc in patient provider appointment lab prescription billing; do
+            echo "→ Migrating $svc against production"
+            cd "services/$svc"
+            ENDPOINT="projects/$svc-dev/branches/production/endpoints/primary"
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            export PGHOST="$HOST"
+            export PGPORT=5432
+            export PGDATABASE=databricks_postgres
+            export PGSSLMODE=require
+            export ENDPOINT_NAME="$ENDPOINT"
+            uv sync --all-groups
+            uv run alembic upgrade head
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: bundle deploy
+        run: databricks bundle deploy -t dev
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          for app in patient provider appointment lab prescription billing hc-portal; do
+            URL=$(databricks apps get "$app-dev" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            echo "Smoke: $app -> $URL"
+            curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
+          done

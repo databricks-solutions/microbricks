@@ -1,0 +1,27 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "provider.app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: SERVICE_NAME
+    value: "provider"
+
+  # See services/patient/app.yaml for the PYTHONPATH=src rationale.
+  - name: PYTHONPATH
+    value: "src"
+
+  # PG* env vars are auto-injected by the Apps platform once the `provider_db`
+  # postgres resource is declared (see resources/provider.yml). Don't shadow.
+  #
+  # ENDPOINT_NAME is the full Lakebase endpoint path used by db.py to mint
+  # per-connection OAuth credentials. `valueFrom: provider_db` resolves the
+  # postgres resource entry to its endpoint path
+  # (projects/provider-<env>/branches/<branch>/endpoints/primary).
+  - name: ENDPOINT_NAME
+    valueFrom: "provider_db"

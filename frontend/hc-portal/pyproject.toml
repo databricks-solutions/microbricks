@@ -1,0 +1,91 @@
+[project]
+name = "hc-portal"
+dynamic = ["version"]
+description = "BFF + React UI: composes the patient view across six backend services."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.74.0",
+    "httpx>=0.27.0",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.12",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.21.1",
+]
+
+[tool.apx.metadata]
+app-name = "hc-portal"
+app-slug = "hc_portal"
+app-entrypoint = "hc_portal.backend.app:app"
+api-prefix = "/api"
+metadata-path = "src/hc_portal/_metadata.py"
+
+[tool.apx.ui]
+root = "src/hc_portal/ui"
+
+[tool.apx.ui.registries]
+"@animate-ui" = "https://animate-ui.com/r/{name}.json"
+"@ai-elements" = "https://registry.ai-sdk.dev/{name}.json"
+"@svgl" = "https://svgl.app/r/{name}.json"
+
+[tool.uv]
+# Standalone (non-workspace) uv project. Databricks Apps detects this
+# pyproject.toml + uv.lock and runs `uv sync` for the Python BFF at deploy
+# time:
+#   https://docs.databricks.com/aws/en/dev-tools/databricks-apps/dependencies
+# (Node deps are picked up separately from package.json.)
+#
+# `package = false` skips installing the local source as a wheel — the runtime
+# imports `hc_portal.backend.app:app` directly from `src/` via PYTHONPATH=src
+# (set in app.yml). The [build-system] / [tool.hatch.*] blocks below stay so
+# that `uv build` still works for ad-hoc wheel builds, but they are inert
+# during `uv sync`.
+package = false
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.version]
+path = "src/hc_portal/_version.py"
+template = '''
+version = "{version}"
+'''
+
+[tool.hatch.build]
+artifacts = ["src/hc_portal/__dist__", "src/hc_portal/_metadata.py"]
+exclude = ["src/hc_portal/ui"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hc_portal"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/hc_portal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# `package = false` (above) intentionally skips installing the local source
+# as a wheel, so `from hc_portal.* import ...` only resolves if `src/` is on
+# sys.path. apx's local devloop sets PYTHONPATH=src; pytest needs the same
+# hint here so a plain `uv run pytest` works out of the box (locally and in
+# CI). This matches the deployed runtime — the App's PYTHONPATH=src in
+# app.yml.
+pythonpath = ["src"]
+markers = [
+    "integration: integration tests requiring deployed preview apps",
+]

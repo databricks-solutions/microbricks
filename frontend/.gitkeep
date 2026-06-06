@@ -1,0 +1,9 @@
+# Frontend placeholder
+
+This directory will hold the frontend apps (one APX project per frontend).
+
+Planned:
+
+- `hc-portal/` — clinician portal (React + FastAPI BFF). The BFF is the only place where
+  data from multiple backend services is joined. See
+  `.claude/skills/hc-bff-pattern/SKILL.md` for the shape.

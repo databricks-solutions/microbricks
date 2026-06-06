@@ -1,0 +1,110 @@
+name: nightly-orphan-cleanup
+
+# Garbage collect Lakebase feature branches whose PR is no longer open. Runs
+# daily; the platform's 24h Lakebase TTL is the safety net for branches that
+# slip through (e.g. when a PR is force-deleted before pr-cleanup gets to it),
+# but reaping them sooner keeps the dev workspace tidy and lowers idle compute.
+#
+# Algorithm:
+#   1. List every Lakebase branch under each <svc>-dev project that starts
+#      with `feat-` or `hotfix-`.
+#   2. List every open PR + every recently-closed-but-unprocessed PR.
+#      Compute the expected slug for each.
+#   3. Anything in (1) whose slug is NOT in (2) is orphaned -> delete via
+#      lakebase-branch-down.sh. Each call is idempotent + tolerant.
+#
+# Bundle-deployed preview apps are NOT deleted by this job — the apps follow
+# the Lakebase branch into oblivion via the Apps platform's resource-cleanup
+# behavior. If an orphan app remains, it'll surface in the dev workspace's
+# `apps list` and we'll handle it manually rather than build a second
+# reconciler here.
+#
+# `workflow_dispatch` is included so a human can run this on demand
+# ("clean up that branch I closed two minutes ago, don't make me wait").
+
+on:
+  schedule:
+    - cron: '17 4 * * *'  # 04:17 UTC; off-peak; minute chosen to avoid round-hour API surge
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orphan-cleanup
+  cancel-in-progress: false
+
+env:
+  DATABRICKS_CLI_VERSION: "0.295.0"
+
+jobs:
+  reap:
+    runs-on: ubuntu-latest
+    # Bind to `dev` so this job sees the env-scoped Databricks secrets.
+    environment:
+      name: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write hc-dev profile to ~/.databrickscfg
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        # See pr-validate.yml for the rationale.
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [hc-dev]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p hc-dev
+
+      - name: Compute open-PR slug allowlist
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # `gh pr list --state open` covers what's actively in flight. We
+        # also include `--state merged` for the past 24h to cover the gap
+        # between merge -> pr-cleanup -> our run; same for `--state closed`.
+        run: |
+          set -euo pipefail
+          ALLOW=()
+          for state in open merged closed; do
+            while IFS= read -r ref; do
+              [[ -z "$ref" ]] && continue
+              SLUG=$(./scripts/sanitize-branch-slug.sh "$ref")
+              ALLOW+=("feat-$SLUG" "hotfix-$SLUG")
+            done < <(gh pr list \
+              --state "$state" \
+              --search "updated:>=$(date -u -d '24 hours ago' +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)" \
+              --json headRefName --jq '.[].headRefName' 2>/dev/null || true)
+          done
+          # Dedupe + emit one slug per line into a file the next step can grep.
+          printf '%s\n' "${ALLOW[@]}" | sort -u > .allowlist
+          echo "Allowlist size: $(wc -l < .allowlist)"
+
+      - name: Reap orphaned Lakebase branches
+        run: |
+          set -euo pipefail
+          for svc in patient provider appointment lab prescription billing; do
+            echo "→ Scanning projects/$svc-dev"
+            BRANCHES=$(databricks postgres list-branches "projects/$svc-dev" -p hc-dev -o json 2>/dev/null \
+              | python3 -c 'import json,sys; [print(b["name"]) for b in json.load(sys.stdin)]' \
+              | grep -E '^(feat|hotfix)-' || true)
+            for branch in $BRANCHES; do
+              if grep -qx "$branch" .allowlist; then
+                echo "  keep $branch (PR still tracked)"
+              else
+                echo "  REAP $branch"
+                ./scripts/lakebase-branch-down.sh "$svc" "$branch" hc-dev
+              fi
+            done
+          done

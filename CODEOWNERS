@@ -1,0 +1,34 @@
+# Default — repo owner reviews everything not otherwise covered
+*                                                       @erinaldidb
+
+# Architecture & shared docs — repo owner only
+/README.md                                              @erinaldidb
+/ARCHITECTURE.md                                        @erinaldidb
+/HEALTHCARE_DATA_MODEL.md                               @erinaldidb
+/CONTRIBUTING.md                                        @erinaldidb
+/databricks.yml                                         @erinaldidb
+/resources/shared.yml                                   @erinaldidb
+
+# Per-service ownership — replace handles when teams form
+/services/patient/                                      @erinaldidb
+/resources/patient.yml                                  @erinaldidb
+/services/provider/                                     @erinaldidb
+/resources/provider.yml                                 @erinaldidb
+/services/appointment/                                  @erinaldidb
+/resources/appointment.yml                              @erinaldidb
+/services/lab/                                          @erinaldidb
+/resources/lab.yml                                      @erinaldidb
+/services/prescription/                                 @erinaldidb
+/resources/prescription.yml                             @erinaldidb
+/services/billing/                                      @erinaldidb
+/resources/billing.yml                                  @erinaldidb
+
+# Frontend / BFF
+/frontend/                                              @erinaldidb
+/resources/hc-portal.yml                                @erinaldidb
+
+# Skills — repo owner gates
+/.claude/skills/                                        @erinaldidb
+
+# CI/CD — repo owner gates
+/.github/                                               @erinaldidb

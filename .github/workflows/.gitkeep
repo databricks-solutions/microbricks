@@ -1,0 +1,10 @@
+# Workflows placeholder
+
+The four workflow files are documented in `.claude/skills/hc-gitflow-cicd/SKILL.md`:
+
+- `pr-validate.yml` — path-scoped lint/unit/integration with per-feature Lakebase branch
+- `deploy-dev.yml` — push to `develop` → `bundle deploy -t dev`
+- `deploy-test.yml` — push to `release/*` or `main` → `bundle deploy -t test`
+- `deploy-prod.yml` — tag `v*` → manual approval → `bundle deploy -t prod`
+
+Authored in a follow-up PR (deferred so workspace IDs / OIDC config are real, not placeholder).

@@ -1,0 +1,79 @@
+[project]
+name = "patient-svc"
+dynamic = ["version"]
+description = "System of record for patient demographics, addresses, and consent."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.74.0",
+    "psycopg[binary,pool]>=3.2.11",
+    "alembic>=1.13.0",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.12",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.apx.metadata]
+app-name = "patient"
+app-slug = "patient"
+app-entrypoint = "patient.app:app"
+api-prefix = "/api/v1"
+metadata-path = "src/patient/_metadata.py"
+
+[tool.uv]
+# Standalone (non-workspace) uv project. Databricks Apps detects this
+# pyproject.toml + uv.lock and runs `uv sync` at deploy time:
+#   https://docs.databricks.com/aws/en/dev-tools/databricks-apps/dependencies
+#
+# `package = false` skips installing the local source as a wheel — the runtime
+# imports `patient.app:app` directly from `src/` via PYTHONPATH=src (set in
+# app.yaml). The [build-system] / [tool.hatch.*] blocks below stay so that
+# `uv build` still works for ad-hoc wheel builds, but they are inert during
+# `uv sync`.
+package = false
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.version]
+path = "src/patient/_version.py"
+template = '''
+version = "{version}"
+'''
+
+[tool.hatch.build]
+artifacts = ["src/patient/__dist__", "src/patient/_metadata.py"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patient"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/patient"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# `package = false` intentionally skips installing the local source as a
+# wheel, so `from patient.* import ...` only resolves if `src/` is on
+# sys.path. The Apps runtime sets PYTHONPATH=src in app.yaml; pytest needs
+# the same hint here so a plain `uv run pytest` works locally and in CI.
+pythonpath = ["src"]
+markers = [
+    "integration: integration tests requiring a live Lakebase endpoint",
+]

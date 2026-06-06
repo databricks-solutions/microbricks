@@ -1,0 +1,82 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# --- Node / bun ---
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+.bun/
+bun.lockb
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- apx / build outputs ---
+**/dist/
+**/build/
+.vite/
+.turbo/
+.next/
+.parcel-cache/
+
+# --- OpenAPI generated ---
+**/ui/src/lib/api.ts
+**/ui/src/lib/api/
+
+# --- Databricks / DAB ---
+.databricks/
+.databrickscfg
+.bundle/
+**/.bundle/
+
+# --- Local env / secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+.secrets/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- Test artifacts ---
+coverage/
+playwright-report/
+test-results/
+*.pid
+*.log
+
+# --- Diagrams temp ---
+docs/diagrams/*.tmp.drawio
+
+# --- Claude Code session files (keep skills, ignore session state) ---
+.claude/projects/
+.claude/sessions/
+.claude/cache/

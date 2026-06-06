@@ -1,0 +1,22 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "appointment.app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: SERVICE_NAME
+    value: "appointment"
+
+  # See services/patient/app.yaml for the PYTHONPATH=src rationale.
+  - name: PYTHONPATH
+    value: "src"
+
+  # PG* env vars are auto-injected by the Apps platform once the
+  # `appointment_db` postgres resource is declared (see resources/appointment.yml).
+  - name: ENDPOINT_NAME
+    valueFrom: "appointment_db"

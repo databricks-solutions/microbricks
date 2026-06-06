@@ -1,0 +1,116 @@
+name: pr-cleanup
+
+# Tear down per-PR preview resources when a PR closes (merged OR closed without
+# merge — the cleanup must happen in both cases). Two things to remove:
+#
+#   1. The preview bundle deploy (`<svc>-dev-<slug>` apps; slug already
+#      carries its `feat-`/`hotfix-` prefix).
+#   2. The Lakebase feature branches + endpoints provisioned by pr-validate.
+#
+# The platform's 24h Lakebase branch TTL is the safety net — if this workflow
+# fails (e.g. a force-pushed deletion before close), the branches are still
+# garbage-collected by the platform AND the nightly-orphan-cleanup.yml job.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Avoid clobbering a still-running pr-validate from the same PR — but DON'T
+# cancel ourselves; cleanup must run to completion.
+concurrency:
+  group: pr-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  DATABRICKS_CLI_VERSION: "0.295.0"
+
+jobs:
+  destroy-preview:
+    runs-on: ubuntu-latest
+    # See pr-validate.yml's bundle-validate job for the env/secrets pattern.
+    environment:
+      name: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute branch slug
+        id: slug
+        run: |
+          # Same transform as pr-validate.yml, fed the same PR head ref.
+          SLUG=$(./scripts/sanitize-branch-slug.sh "${{ github.head_ref }}")
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write hc-dev profile to ~/.databrickscfg
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        # See pr-validate.yml for the rationale.
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [hc-dev]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p hc-dev
+
+      - name: Destroy preview bundle
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+        # `bundle destroy` keyed on the same root_path the preview deploy
+        # used. `--auto-approve` skips the interactive confirmation; no
+        # human is here. Tolerant of "no bundle state at root_path"
+        # (early PR close before the first preview-deploy run completed).
+        run: |
+          set +e
+          databricks bundle destroy -t dev \
+            --var "app_name_suffix=-$SLUG" \
+            --var "lakebase_branch=$SLUG" \
+            --auto-approve
+          rc=$?
+          if [[ $rc -ne 0 ]]; then
+            echo "::warning::bundle destroy returned $rc — likely nothing to destroy."
+          fi
+          exit 0
+
+      - name: Tear down Lakebase feature branches
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+        # We don't track which services this PR provisioned (state would
+        # need to live somewhere durable), so we sweep all six. Each call
+        # is idempotent and tolerant of "branch already gone".
+        run: |
+          for svc in patient provider appointment lab prescription billing; do
+            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" hc-dev
+          done
+
+      - name: Comment cleanup outcome on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const slug = '${{ steps.slug.outputs.slug }}';
+            const merged = ${{ github.event.pull_request.merged }};
+            const verb = merged ? 'merged' : 'closed';
+            const body = [
+              '### 🧹 Preview cleanup complete',
+              '',
+              `PR ${verb}; tore down preview apps and Lakebase branches for \`${slug}\`.`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });

@@ -1,0 +1,37 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "patient.app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: SERVICE_NAME
+    value: "patient"
+
+  # The `patient` package lives under `src/patient/` (hatchling src-layout).
+  # The Apps runtime uploads `services/patient/` as the source root and, since
+  # `pyproject.toml` + `uv.lock` are present (and no `requirements.txt`), runs
+  # `uv sync` to install dependencies — see
+  # https://docs.databricks.com/aws/en/dev-tools/databricks-apps/dependencies
+  #
+  # `[tool.uv] package = false` in pyproject.toml means uv installs deps but
+  # NOT the local source as a wheel, so adding `src` to PYTHONPATH is what
+  # lets uvicorn import `patient.app:app` directly without a build step.
+  - name: PYTHONPATH
+    value: "src"
+
+  # PGHOST / PGUSER / PGDATABASE / PGPORT / PGSSLMODE / PGAPPNAME are
+  # auto-injected by the Apps platform once the `patient_db` postgres resource
+  # is declared in resources/patient.yml. Don't shadow them here.
+  #
+  # ENDPOINT_NAME is the Lakebase endpoint path (e.g.
+  # `projects/patient-dev/branches/production/endpoints/primary`) used by
+  # `db.py` to mint per-connection OAuth credentials. `valueFrom: patient_db`
+  # resolves the postgres resource (whose name matches the resources entry
+  # in resources/patient.yml) to its endpoint path.
+  - name: ENDPOINT_NAME
+    valueFrom: "patient_db"

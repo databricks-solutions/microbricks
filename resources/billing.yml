@@ -1,0 +1,21 @@
+# See resources/patient.yml: Lakebase projects are managed outside the
+# bundle. Use `scripts/lakebase-project-{up,down}.sh` for project lifecycle.
+resources:
+  apps:
+    billing_app:
+      name: billing-${bundle.target}${var.app_name_suffix}
+      description: "System of record for invoices, payer claims, and payments."
+      source_code_path: ../services/billing
+
+      # See resources/patient.yml for why backend services need `postgres`.
+      user_api_scopes:
+        - "postgres"
+
+      resources:
+        - name: billing_db
+          description: "Billing service Lakebase Autoscale project."
+          postgres:
+            # See databricks.yml for `lakebase_branch` semantics.
+            branch: projects/billing-${bundle.target}/branches/${var.lakebase_branch}
+            database: projects/billing-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            permission: CAN_CONNECT_AND_CREATE

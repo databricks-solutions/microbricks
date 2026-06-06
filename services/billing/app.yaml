@@ -1,0 +1,22 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "billing.app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: SERVICE_NAME
+    value: "billing"
+
+  # See services/patient/app.yaml for the PYTHONPATH=src rationale.
+  - name: PYTHONPATH
+    value: "src"
+
+  # PG* env vars are auto-injected by the Apps platform once the `billing_db`
+  # postgres resource is declared (see resources/billing.yml).
+  - name: ENDPOINT_NAME
+    valueFrom: "billing_db"

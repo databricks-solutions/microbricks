@@ -1,0 +1,139 @@
+name: deploy-test
+
+# Deploys to the `test` workspace. Triggered by:
+#   - push to release/* (cutting a release branch automatically lands here)
+#   - push to main (the release-PR merge produces a push event on main)
+#
+# `test` is a production-mode bundle (no per-user root_path) on the hc-test
+# profile. Lakebase branches are always `production` here — feature isolation
+# only happens in dev.
+#
+# Same migration-then-deploy ordering as deploy-dev. The smoke tests at the
+# end gate the run; a failure here blocks the release from being tagged for
+# prod.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+env:
+  DATABRICKS_CLI_VERSION: "0.295.0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [patient, provider, appointment, lab, prescription, billing]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - name: uv sync
+        working-directory: services/${{ matrix.service }}
+        run: uv sync --all-groups
+      - name: Tests
+        working-directory: services/${{ matrix.service }}
+        # Run integration tests too where they don't require a live DB; the
+        # ones marked `integration` are skipped by default in CI because we
+        # don't bind a feature endpoint here.
+        run: uv run pytest -m 'not integration' -q
+
+  test-portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - name: uv sync (BFF)
+        working-directory: frontend/hc-portal
+        run: uv sync --all-groups
+      - name: BFF tests
+        working-directory: frontend/hc-portal
+        run: uv run pytest -m 'not integration' -q
+
+  deploy:
+    needs: [test, test-portal]
+    runs-on: ubuntu-latest
+    environment:
+      name: test
+      url: https://hc-portal-test.databricksapps.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write hc-test profile to ~/.databrickscfg
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_TEST }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        # See pr-validate.yml for the rationale.
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [hc-test]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p hc-test
+
+      - name: Ensure Lakebase projects exist (idempotent)
+        # See deploy-dev.yml for rationale.
+        run: |
+          for svc in patient provider appointment lab prescription billing; do
+            ./scripts/lakebase-project-up.sh "$svc" test hc-test
+          done
+
+      - name: Run migrations (production branches, all six services)
+        run: |
+          set -euo pipefail
+          export LOCAL_DEV_TOKEN=$(databricks auth token -p hc-test | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          export PGUSER=$(databricks current-user me -p hc-test -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+          for svc in patient provider appointment lab prescription billing; do
+            echo "→ Migrating $svc against test/production"
+            cd "services/$svc"
+            ENDPOINT="projects/$svc-test/branches/production/endpoints/primary"
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-test -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            export PGHOST="$HOST"
+            export PGPORT=5432
+            export PGDATABASE=databricks_postgres
+            export PGSSLMODE=require
+            export ENDPOINT_NAME="$ENDPOINT"
+            uv sync --all-groups
+            uv run alembic upgrade head
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: bundle deploy
+        run: databricks bundle deploy -t test
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          for app in patient provider appointment lab prescription billing hc-portal; do
+            URL=$(databricks apps get "$app-test" -p hc-test -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            echo "Smoke: $app -> $URL"
+            curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
+          done

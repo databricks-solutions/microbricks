@@ -1,0 +1,79 @@
+bundle:
+  name: microbricks
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: "Unity Catalog the apps read from. Overridden per target."
+    default: "main"
+
+  # Suffix appended to every app name. Empty by default, so the dev/test/prod
+  # deploys produce stable names like `patient-dev` / `hc-portal-test`. The
+  # PR-preview workflow overrides it to `-feat-<slug>`, yielding
+  # `patient-dev-feat-<slug>`. The BFF's runtime URL resolution
+  # (`frontend/hc-portal/src/hc_portal/clients/_base.py`) strips its own
+  # `hc-portal` prefix off the platform-injected `DATABRICKS_APP_URL`, so as
+  # long as every sibling app shares the same suffix shape, downstream URLs
+  # resolve correctly with no cross-app DAB wiring.
+  app_name_suffix:
+    description: "Optional suffix appended to every app name. Empty for stable deploys; '-feat-<slug>' for per-PR previews."
+    default: ""
+
+  # The Lakebase branch each app's postgres resource attaches to. Defaults to
+  # the long-lived `production` branch (the only valid choice for `test` and
+  # `prod` targets). For dev, override with the current git slug so each
+  # feature branch deploys against its own copy-on-write Lakebase branch:
+  #
+  #   SLUG=$(./scripts/sanitize-branch-slug.sh "$(git branch --show-current)")
+  #   databricks bundle deploy -t dev \
+  #     --var "lakebase_branch=feat-$SLUG" \
+  #     --var "app_name_suffix=-feat-$SLUG"
+  #
+  # The branch must already exist (create it with the workflow in
+  # .claude/skills/hc-lakebase-branching/SKILL.md or scripts/lakebase-branch-up.sh
+  # before deploying).
+  lakebase_branch:
+    description: "Lakebase branch every <svc>_db postgres resource binds to. 'production' for test/prod; 'feat-<slug>' for per-feature-branch dev deploys."
+    default: "production"
+
+targets:
+  # `dev` covers two related deploy shapes:
+  #   1. The "trunk dev" deploy on every push to `develop`, with no overrides.
+  #      Produces apps like `patient-dev` bound to the long-lived `production`
+  #      Lakebase branch.
+  #   2. Per-PR preview deploys, where pr-validate.yml passes
+  #      `--var app_name_suffix=-feat-<slug> --var lakebase_branch=feat-<slug>`.
+  #      Each preview lives at its own root_path (so concurrent PRs don't
+  #      stomp each other's bundle state) and its own Lakebase branch.
+  dev:
+    default: true
+    mode: development
+    workspace:
+      profile: hc-dev
+      # `mode: development` requires `${workspace.current_user.userName}` in
+      # root_path for per-user isolation. Then `${var.app_name_suffix}`
+      # ("" for the trunk-dev deploy on `develop` push, "-feat-<slug>" for
+      # PR previews) further distinguishes concurrent deploys made by the
+      # same identity (e.g. the CI service principal running multiple PRs)
+      # so `bundle deploy`/`bundle destroy` are isolated per PR.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}${var.app_name_suffix}
+    variables:
+      catalog: "hc_dev"
+
+  test:
+    mode: production
+    workspace:
+      profile: hc-test
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: "hc_test"
+
+  prod:
+    mode: production
+    workspace:
+      profile: hc-prod
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: "hc_prod"

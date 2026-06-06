@@ -1,0 +1,24 @@
+command:
+  - "uvicorn"
+  - "hc_portal.backend.app:app"
+  - "--workers"
+  - "2"
+
+env:
+  - name: SERVICE_NAME
+    value: "hc-portal"
+
+# Per-service URLs are resolved at runtime by `clients/_base.py`:
+#   1. Explicit override `<SVC>_SVC_URL` (e.g. `PATIENT_SVC_URL`) if set.
+#   2. Otherwise, derived from `DATABRICKS_APP_URL` + the canonical
+#      `<svc>-<target>-<workspace_suffix>` host pattern.
+#
+# Use overrides for: local dev (point at `http://localhost:800x`), per-PR
+# previews (point at the preview app's URL), or any cross-region/cross-
+# workspace fan-out where the convention doesn't apply. Uncomment the
+# block below to set one or more.
+#
+#  - name: PATIENT_SVC_URL
+#    value: "https://patient-pr-1234-7474643727449861.aws.databricksapps.com"
+#  - name: PROVIDER_SVC_URL
+#    value: "http://localhost:8002"

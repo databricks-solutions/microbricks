@@ -1,0 +1,17 @@
+# Shared resource overlay — cross-cutting variables and labels reused across
+# every per-service file. Per the hc-dab-deployment skill, target-conditional
+# logic lives in the root databricks.yml; this file is for resource-shaped
+# bits that genuinely span services. It is intentionally light today — most
+# variables (catalog, *_endpoint, preview_slug) are declared at the bundle
+# root so they can be overridden via `databricks bundle deploy --var`.
+
+# Common labels applied to every app and database. Bundle deploy merges these
+# with per-resource labels in each <svc>.yml. Labels are how cost reporting
+# and the nightly orphan-cleanup job find resources that belong to this repo.
+variables:
+  common_labels:
+    description: "Labels stamped on every app + database in this bundle."
+    default:
+      project: "microbricks"
+      managed_by: "dab"
+      target: "${bundle.target}"
