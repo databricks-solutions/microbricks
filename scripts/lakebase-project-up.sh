@@ -13,7 +13,10 @@
 #   so the project doesn't need to be in the bundle at all.
 #
 # Each project has:
-#   - A `production` branch (auto-created on project provision).
+#   - A `production` branch (auto-created on project provision, then
+#     marked `is_protected=true` here so it can't be deleted accidentally
+#     and only protected branches can be `restore-target`s of recovery
+#     operations).
 #   - A `primary` endpoint on `production` (auto-created), 0.5/4 CU
 #     scale-to-zero per the Phase 5 design.
 # Per-feature branches are still managed by `lakebase-branch-{up,down}.sh`.
@@ -39,10 +42,36 @@ PROFILE="${3:-hc-$ENV}"
 PROJECT_ID="$SERVICE-$ENV"
 PROJECT_PATH="projects/$PROJECT_ID"
 
+PRODUCTION_BRANCH_PATH="$PROJECT_PATH/branches/production"
+
 >&2 echo "→ Ensuring Lakebase project $PROJECT_PATH (profile=$PROFILE)"
+
+ensure_production_branch_protected() {
+  # The `production` branch is auto-created with `is_protected=false`. We
+  # always set it to true here so:
+  #   - The branch can't be accidentally deleted (the API rejects deletion
+  #     of protected branches).
+  #   - Recovery / point-in-time-restore operations can target it as a
+  #     `restore_target` (only protected branches qualify).
+  # Field path is `spec.is_protected` (the `status.is_protected` value seen
+  # in get-branch is the read-only mirror).
+  local current
+  current="$(databricks postgres get-branch "$PRODUCTION_BRANCH_PATH" -p "$PROFILE" -o json 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"].get("is_protected", False))' 2>/dev/null \
+    || echo "False")"
+  if [[ "$current" == "True" ]]; then
+    >&2 echo "  production branch already protected"
+    return 0
+  fi
+  >&2 echo "  protecting production branch"
+  databricks postgres update-branch "$PRODUCTION_BRANCH_PATH" spec.is_protected \
+    --json '{"spec":{"is_protected":true}}' \
+    -p "$PROFILE" >/dev/null
+}
 
 if databricks postgres get-project "$PROJECT_PATH" -p "$PROFILE" >/dev/null 2>&1; then
   >&2 echo "  project $PROJECT_ID already exists, reusing"
+  ensure_production_branch_protected
   exit 0
 fi
 
@@ -67,3 +96,5 @@ EOF
 )" -p "$PROFILE" >/dev/null
 
 >&2 echo "  created $PROJECT_ID"
+
+ensure_production_branch_protected

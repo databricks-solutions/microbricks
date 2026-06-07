@@ -101,13 +101,13 @@ Steps (per service that changed):
    uv run alembic upgrade head
    ```
 
-5. **Deploy preview app** with the per-PR overrides — see `hc-dab-deployment` "Per-PR preview deployment" for the full rationale:
+5. **Deploy + start preview apps** with the per-PR overrides — see `hc-dab-deployment` "Per-PR preview deployment" for the full rationale:
    ```bash
-   databricks bundle deploy -t dev \
+   scripts/deploy-and-run-bundle.sh dev \
      --var "app_name_suffix=-feat-$SLUG" \
      --var "lakebase_branch=feat-$SLUG"
    ```
-   The suffix prefixes every app name (`patient-dev-feat-<slug>`) AND the bundle's dev `root_path`, so per-PR previews are isolated on disk and in app names. `lakebase_branch` rebinds every postgres resource to the per-feature branch — `pr-validate.yml` provisions branches for all six services up-front so untouched services' postgres references still resolve.
+   The script does both `bundle deploy` (registers the seven app resources) AND `bundle run <app_key>` for each app (submits an app deployment from the synced source and starts the app). Without the second step, apps stay in `UNAVAILABLE` — see `hc-dab-deployment`'s "`bundle deploy` vs. `bundle run`" section for the full breakdown. The suffix prefixes every app name (`patient-dev-feat-<slug>`) AND the bundle's dev `root_path`, so per-PR previews are isolated on disk and in app names. `lakebase_branch` rebinds every postgres resource to the per-feature branch — `pr-validate.yml` provisions branches for all six services up-front so untouched services' postgres references still resolve.
 
 6. **Run integration + contract tests** against the preview app URL.
 
@@ -116,6 +116,8 @@ Steps (per service that changed):
 8. **Post results as a PR comment**: preview URLs, test results, link to logs.
 
 On PR close / merge: a `pr-cleanup.yml` workflow runs `databricks bundle destroy` for the preview resources and the `lakebase-branch-down.sh` script.
+
+> **Note: the three deploy-`<env>`.yml workflows currently call raw `databricks bundle deploy` — they do NOT yet call `bundle run` per app.** That means a workflow run finishes "green" but leaves the apps in `UNAVAILABLE` until something else (a developer running `scripts/deploy-and-run-bundle.sh <env> --skip-deploy`, or a separate "kick the apps" step) submits an app deployment. The smoke-test step in each workflow still passes because it hits the routed `/healthz` URL, which returns 200 from the previously-deployed app version. New code only goes live after `bundle run`. Track this as a CI gap; the canonical local verb is `scripts/deploy-and-run-bundle.sh <env>`.
 
 ### `deploy-dev.yml`
 
@@ -129,7 +131,7 @@ Steps:
 
 1. Run all unit tests across services.
 2. For each service, run `alembic upgrade head` against `<svc>-dev/production`.
-3. `databricks bundle deploy -t dev`.
+3. `databricks bundle deploy -t dev`. (See note above — does not start the apps.)
 4. Smoke-test all deployed apps' `/healthz` endpoints.
 
 ### `deploy-test.yml`
@@ -144,7 +146,7 @@ Steps:
 
 1. Run all unit tests + integration tests (against deployed dev environment, since test isn't yet up).
 2. For each service, run `alembic upgrade head` against `<svc>-test/production`.
-3. `databricks bundle deploy -t test`.
+3. `databricks bundle deploy -t test`. (See note above.)
 4. Run smoke + E2E tests against test workspace.
 
 ### `deploy-prod.yml`
@@ -170,12 +172,12 @@ Steps:
 1. Verify the tag is on `main`.
 2. Wait for manual approval (configured per `prod` environment in GitHub Settings).
 3. Run all migrations against `<svc>-prod/production`.
-4. `databricks bundle deploy -t prod`.
+4. `databricks bundle deploy -t prod`. (See note above.)
 5. Smoke-test prod URLs.
 6. On failure, the rollback is "redeploy the previous tag":
    ```bash
    git checkout <previous-tag>
-   databricks bundle deploy -t prod
+   scripts/deploy-and-run-bundle.sh prod
    ```
    Documented in `docs/runbooks/prod-rollback.md` (deferred).
 
@@ -311,6 +313,7 @@ It still has to. Skipping test isn't a procedure — it's an outage waiting to h
 - [ ] `pr-validate.yml` is path-scoped (changes to `services/lab/` don't spin up `patient`'s preview)
 - [ ] Cleanup workflow handles all PR close paths (merged AND closed-without-merge)
 - [ ] Deploy workflows include `alembic upgrade head` BEFORE `bundle deploy`, not after
+- [ ] Deploy workflows that need to actually start apps (not just register resources) call `databricks bundle run -t <env> <app_key>` after `bundle deploy`, or invoke `scripts/deploy-and-run-bundle.sh <env>` instead. Raw `bundle deploy` alone leaves apps in `UNAVAILABLE` — see `hc-dab-deployment`'s "`bundle deploy` vs. `bundle run`".
 
 ## Verification
 

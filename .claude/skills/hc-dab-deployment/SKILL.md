@@ -5,7 +5,53 @@ description: Deploy services to dev/test/prod via Databricks Asset Bundles. Use 
 
 # hc-dab-deployment
 
-DABs (Declarative Automation Bundles, formerly Databricks Asset Bundles) are the single deployment mechanism. One `databricks bundle deploy -t <target>` deploys every service + every Lakebase project + every job atomically against the target workspace.
+DABs (Declarative Automation Bundles, formerly Databricks Asset Bundles) deploy every service + every job atomically against the target workspace. Lakebase **projects** are intentionally OUTSIDE the bundle (see below) — they must be provisioned first via `scripts/lakebase-project-up.sh`, then `databricks bundle deploy -t <target>` wires the apps to those projects.
+
+## Deploy order (always)
+
+1. **Provision Lakebase projects** for the target — once per `(service, env)` pair, idempotent:
+   ```bash
+   for svc in patient provider appointment lab prescription billing; do
+     ./scripts/lakebase-project-up.sh "$svc" <env>
+   done
+   ```
+   Skipping this step makes `bundle deploy` fail with `Postgres branch projects/<svc>-<env>/branches/production does not exist` — the bundle's app resources reference these projects by path string, so the projects must exist first.
+2. **Validate** the bundle: `databricks bundle validate -t <target>`.
+3. **Deploy + start** the apps: `scripts/deploy-and-run-bundle.sh <target>`. This wraps `bundle deploy` (which materializes the seven app *resources* but leaves them in `UNAVAILABLE`) with a `bundle run` per app key, which submits an app deployment from the synced source and starts the app. See "`bundle deploy` vs. `bundle run`" below.
+
+For per-PR previews, replace step 1 with `scripts/lakebase-branch-up.sh` per service (creates the `feat-<slug>` branch on the existing project) and pass the matching `--var` overrides into the deploy-and-run script in step 3 — see "Per-PR preview deployment" below.
+
+## `bundle deploy` vs. `bundle run`
+
+`databricks bundle deploy` is two things stuck together:
+
+1. Sync the source tree into the workspace (`/Workspace/.../source/...` under the bundle's `root_path`).
+2. Materialize each declared resource — for an `app` resource that means *registering* the app with the Apps platform, attaching Lakebase + cross-app permissions, and plumbing env vars.
+
+What it does **NOT** do is submit an app *deployment* — the platform unit that pulls the synced source path and actually starts running the app. So a fresh `bundle deploy` against a never-deployed workspace leaves every app in `UNAVAILABLE`.
+
+`databricks bundle run -t <target> <app_key>` is the verb that flips them on. For an app resource it (a) submits a new app deployment from `source_code_path`, (b) starts/updates the running app, (c) blocks until ACTIVE (or fails). Run it once per app key after `bundle deploy` and the apps are live.
+
+`scripts/deploy-and-run-bundle.sh` does both in deploy-order (services first, BFF last):
+
+```bash
+# Trunk-dev: deploy bundle, then start all 7 apps
+scripts/deploy-and-run-bundle.sh dev
+
+# Already deployed; just (re)launch every app
+scripts/deploy-and-run-bundle.sh dev --skip-deploy --restart
+
+# Iterate on one or two services
+scripts/deploy-and-run-bundle.sh dev --only=patient,lab
+
+# PR-preview shape (matches ci-local.sh pr-validate's overrides)
+SLUG=$(./scripts/sanitize-branch-slug.sh "$(git branch --show-current)")
+scripts/deploy-and-run-bundle.sh dev \
+  --var "app_name_suffix=-feat-$SLUG" \
+  --var "lakebase_branch=feat-$SLUG"
+```
+
+Pass-through flags: `--no-wait`, `--restart` (forwarded to `bundle run`); `--var KEY=VALUE` (forwarded to both `bundle deploy` and `bundle run`); `--skip-deploy` (skip step 1 if the bundle is already up-to-date); `--only=<svc,svc,...>` (restrict to a comma-separated subset of app keys). The script does NOT run Lakebase project provisioning, migrations, or smoke tests — for the full pipeline use `ci-local.sh deploy <env>`.
 
 ## When to use
 
@@ -324,17 +370,27 @@ auth_type = databricks-cli
 ## CLI verbs
 
 ```bash
-# Always validate first — catches schema errors and unresolved references
+# 0. Provision Lakebase projects FIRST (idempotent — no-op if they exist).
+#    The bundle's app resources reference these by path; if missing, the
+#    deploy fails with "Postgres branch projects/<svc>-<env>/branches/production
+#    does not exist".
+for svc in patient provider appointment lab prescription billing; do
+  ./scripts/lakebase-project-up.sh "$svc" dev
+done
+
+# Always validate next — catches schema errors and unresolved references
 databricks bundle validate -t dev
 
-# Deploy
-databricks bundle deploy -t dev
+# Canonical deploy: register resources AND start every app.
+# Wrapper around `bundle deploy` + `bundle run <app_key>` for each of the
+# seven apps. Without the `bundle run` step every app stays in UNAVAILABLE.
+scripts/deploy-and-run-bundle.sh dev
 
-# Sync (faster than deploy, copies source files but skips resource provisioning)
-databricks bundle sync -t dev
-
-# Run a specific resource (e.g. trigger a job)
-databricks bundle run -t dev <job_resource_key>
+# Lower-level pieces if you need them — for diffing what's wired vs.
+# what's actually running, or for app-only re-deploys:
+databricks bundle deploy -t dev                # register resources only
+databricks bundle run    -t dev <app_key>      # start a single app
+databricks bundle sync   -t dev                # source-only sync (no resource changes)
 
 # See what's deployed
 databricks bundle summary -t dev
@@ -352,23 +408,28 @@ databricks bundle destroy -t dev
 
 ```bash
 # Override a variable at deploy time
-databricks bundle deploy -t test --var "catalog=hc_test_canary"
+scripts/deploy-and-run-bundle.sh test --var "catalog=hc_test_canary"
 
 # Per-feature-branch dev deploy: bind every app to your Lakebase branch
+# AND name them with a -feat-<slug> suffix so they don't collide with trunk-dev.
 SLUG=$(./scripts/sanitize-branch-slug.sh "$(git branch --show-current)")
-databricks bundle deploy -t dev --var "lakebase_branch=feat-$SLUG"
+scripts/deploy-and-run-bundle.sh dev \
+  --var "app_name_suffix=-feat-$SLUG" \
+  --var "lakebase_branch=feat-$SLUG"
 ```
 
-The branch must already exist (`hc-lakebase-branching` covers creation). The bundle's `lakebase_branch` default is `"production"`, which is the only valid choice for `test` and `prod`.
+`--var KEY=VALUE` is forwarded to both `bundle deploy` and `bundle run` underneath. The branch must already exist (`hc-lakebase-branching` covers creation). The bundle's `lakebase_branch` default is `"production"`, which is the only valid choice for `test` and `prod`.
 
 ## What to do before deploying
 
 | Step | Why |
 |---|---|
-| `databricks bundle validate -t <target>` | Catches schema errors, unresolved refs, missing files |
+| Run `scripts/lakebase-project-up.sh <svc> <env>` for all six services | The bundle's `apps.<svc>_app.resources[].postgres` blocks reference `projects/<svc>-<env>/branches/<branch>` by path string. If the project doesn't exist, deploy fails with `Postgres branch ... does not exist`. The script is idempotent — safe to re-run on every deploy. |
+| `databricks bundle validate -t <target>` | Catches schema errors, unresolved refs, missing files. Validation does NOT check that referenced Lakebase projects exist — that fails at apply time. |
 | Run service tests locally | Bundle deploy doesn't run tests — that's CI's job, but smoke locally first |
 | For dev with `lakebase_branch=feat-...`: confirm the branch exists | Otherwise the postgres resource declaration fails at deploy time |
 | For test/prod: confirm migration plan | Bundle deploy doesn't auto-run Alembic; the deploy workflow runs `alembic upgrade head` first |
+| Use `scripts/deploy-and-run-bundle.sh <env>` rather than raw `bundle deploy` | `bundle deploy` alone leaves apps in `UNAVAILABLE` (see "`bundle deploy` vs. `bundle run`" above) |
 | For prod: have a rollback plan | DAB has no built-in rollback — the rollback is "redeploy the previous tag" |
 
 ## Path-resolution rules (gotchas)
@@ -384,7 +445,7 @@ A PR can deploy ephemeral preview apps wired to feature-branch endpoints by over
 
 ```bash
 SLUG=$(./scripts/sanitize-branch-slug.sh "$GITHUB_HEAD_REF")
-databricks bundle deploy -t dev \
+scripts/deploy-and-run-bundle.sh dev \
   --var "app_name_suffix=-feat-$SLUG" \
   --var "lakebase_branch=feat-$SLUG"
 ```
@@ -399,10 +460,17 @@ The PR's `pr-validate.yml` workflow drives this for you. `pr-cleanup.yml` runs t
 ## Verification
 
 ```bash
-# After a deploy:
+# After a deploy-and-run:
 databricks bundle summary -t dev | grep -E "apps|Postgres" | head
 databricks apps list -p hc-dev | grep "<svc>-dev"
 databricks postgres list-projects -p hc-dev | grep "<svc>-dev"
+
+# Confirm each app is actually serving (not just registered).
+# `compute_status.state` should be RUNNING and `app_status.state` should be
+# RUNNING; if either is UNAVAILABLE the bundle was deployed but the app
+# was never `bundle run`. Re-run scripts/deploy-and-run-bundle.sh dev --skip-deploy.
+databricks apps get patient-dev -p hc-dev -o json \
+  | jq '{compute: .compute_status.state, app: .app_status.state, url}'
 
 # Inspect the wired resources for one app
 databricks apps get patient-dev -p hc-dev -o json | jq '.resources, .user_api_scopes'
@@ -413,6 +481,7 @@ curl -s https://<svc>-dev.<workspace>.databricksapps.com/api/v1/healthz | jq
 
 ## Checklist before merging changes to `databricks.yml` / `resources/`
 
+- [ ] All six Lakebase projects for the target env exist (`databricks postgres list-projects -p hc-<env> | grep -E '^(patient|provider|appointment|lab|prescription|billing)-<env>'` returns six rows). If not, run `scripts/lakebase-project-up.sh` for each missing one.
 - [ ] `databricks bundle validate -t dev` passes locally
 - [ ] `databricks bundle validate -t test` passes locally
 - [ ] `databricks bundle validate -t prod` passes locally
