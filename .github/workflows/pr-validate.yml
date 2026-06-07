@@ -362,7 +362,6 @@ jobs:
           # Mint a token once for alembic (services/<svc>/migrations/env.py
           # reads LOCAL_DEV_TOKEN to call `WorkspaceClient(...).postgres
           # .generate_database_credential(...)` per connection).
-          export LOCAL_DEV_TOKEN=$(databricks auth token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           for svc in ${{ steps.changed.outputs.services }}; do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
@@ -374,6 +373,7 @@ jobs:
             export PGUSER=$(databricks current-user me -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
+            export LOCAL_DEV_TOKEN=$(databricks postgres generate-database-credential $ENDPOINT)
             uv sync --all-groups
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
@@ -406,8 +406,6 @@ jobs:
           # gateway lets unauthenticated /healthz through (it's the only
           # path that's unguarded by design). /api/v1/* should 401.
           # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
-          databricks auth login --profile hc-dev
-          TOKEN=$(databricks auth token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           for app in patient provider appointment lab prescription billing hc-portal; do
             URL=$(databricks apps get "$app-dev-$SLUG" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
             if [[ -z "$URL" ]]; then
