@@ -359,21 +359,22 @@ jobs:
         # applied; the COW from `production` carries them forward.
         run: |
           set -euo pipefail
-          # Mint a token once for alembic (services/<svc>/migrations/env.py
-          # reads LOCAL_DEV_TOKEN to call `WorkspaceClient(...).postgres
-          # .generate_database_credential(...)` per connection).
+          # env.py uses LOCAL_DEV_TOKEN as a Databricks bearer token passed to
+          # WorkspaceClient(token=...) which then calls generate_database_credential
+          # itself.  We must supply a Databricks token here, NOT a Postgres credential.
+          LOCAL_DEV_TOKEN=$(databricks auth token -p hc-dev --output json | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          export LOCAL_DEV_TOKEN
           for svc in ${{ steps.changed.outputs.services }}; do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
             ENDPOINT="projects/$svc-dev/branches/$SLUG/endpoints/primary"
-            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
             export PGDATABASE=databricks_postgres
-            export PGUSER=$(databricks current-user me -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+            export PGUSER=$(databricks current-user me -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
-            export LOCAL_DEV_TOKEN=$(databricks postgres generate-database-credential $ENDPOINT)
             uv sync --all-groups
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
