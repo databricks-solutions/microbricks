@@ -228,7 +228,7 @@ jobs:
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me -p hc-dev
+          databricks current-user me
 
       - name: bundle validate
         # The slug from sanitize-branch-slug.sh already carries the `feat-`
@@ -299,7 +299,7 @@ jobs:
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me -p hc-dev
+          databricks current-user me
 
       - name: Compute changed-services list
         id: changed
@@ -362,16 +362,16 @@ jobs:
           # Mint a token once for alembic (services/<svc>/migrations/env.py
           # reads LOCAL_DEV_TOKEN to call `WorkspaceClient(...).postgres
           # .generate_database_credential(...)` per connection).
-          export LOCAL_DEV_TOKEN=$(databricks auth token -p hc-dev | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          export LOCAL_DEV_TOKEN=$(databricks auth token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           for svc in ${{ steps.changed.outputs.services }}; do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
             ENDPOINT="projects/$svc-dev/branches/$SLUG/endpoints/primary"
-            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
             export PGDATABASE=databricks_postgres
-            export PGUSER=$(databricks current-user me -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+            export PGUSER=$(databricks current-user me -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
             uv sync --all-groups
@@ -406,9 +406,9 @@ jobs:
           # gateway lets unauthenticated /healthz through (it's the only
           # path that's unguarded by design). /api/v1/* should 401.
           # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
-          TOKEN=$(databricks auth token -p hc-dev | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          TOKEN=$(databricks auth token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           for app in patient provider appointment lab prescription billing hc-portal; do
-            URL=$(databricks apps get "$app-dev-$SLUG" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            URL=$(databricks apps get "$app-dev-$SLUG" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
             if [[ -z "$URL" ]]; then
               echo "::error::App $app-dev-$SLUG has no URL — deploy may have failed"
               exit 1
