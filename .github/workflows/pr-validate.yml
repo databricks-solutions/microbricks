@@ -228,7 +228,7 @@ jobs:
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me
+          databricks current-user me --profile hc-dev
 
       - name: bundle validate
         # The slug from sanitize-branch-slug.sh already carries the `feat-`
@@ -299,7 +299,7 @@ jobs:
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me
+          databricks current-user me --profile hc-dev
 
       - name: Compute changed-services list
         id: changed
@@ -406,6 +406,7 @@ jobs:
           # gateway lets unauthenticated /healthz through (it's the only
           # path that's unguarded by design). /api/v1/* should 401.
           # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
+          databricks auth login --profile hc-dev
           TOKEN=$(databricks auth token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           for app in patient provider appointment lab prescription billing hc-portal; do
             URL=$(databricks apps get "$app-dev-$SLUG" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
