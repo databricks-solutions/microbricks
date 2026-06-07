@@ -38,7 +38,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DATABRICKS_CLI_VERSION: "0.295.0"
+  DATABRICKS_CLI_VERSION: "1.2.1"
 
 jobs:
   # ---------------------------------------------------------------------------
