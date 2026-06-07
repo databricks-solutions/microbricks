@@ -26,6 +26,9 @@ concurrency:
 
 env:
   DATABRICKS_CLI_VERSION: "1.2.1"
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_PROD }}
+  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
 jobs:
   verify-tag-on-main:
