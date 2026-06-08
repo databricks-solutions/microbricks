@@ -119,6 +119,22 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
 
+      # See deploy-dev.yml for the full rationale. Same shape — bun + apx
+      # + build-frontends.sh, which iterates over every apx project under
+      # `frontend/`. Without this, `bundle deploy` ships a UI-less app
+      # because each project's `src/<pkg>/__dist__/` is gitignored.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
+
       - name: bundle deploy
         run: databricks bundle deploy -t prod
 

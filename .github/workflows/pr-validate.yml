@@ -176,10 +176,12 @@ jobs:
   # the BFF tests don't need node_modules, and the install routinely hung on
   # GH-hosted runners (~18 min and counting on PR #1) — likely a registry
   # timeout interacting with the OpenTelemetry + Radix UI dep set. The UI
-  # ships pre-built via `apx build` at deploy time; lockfile drift is caught
-  # by the deploy pipeline. If we ever need to gate PRs on UI typecheck/build,
-  # add a separate `ui-checks` job with `actions/cache` keyed on bun.lock and
-  # a hard timeout.
+  # is built later in `preview-deploy` (via `scripts/build-frontends.sh`)
+  # immediately before `bundle deploy`, so a broken UI build still fails
+  # the PR — just at the deploy stage instead of as a parallel typecheck.
+  # If we ever want to gate earlier (parallel with `service-checks` for
+  # faster feedback), add a separate `ui-checks` job with `actions/cache`
+  # keyed on bun.lock and a hard timeout.
 
   # ---------------------------------------------------------------------------
   # Stage 3: bundle validate. Always runs — even if only `services/<svc>/README.md`
@@ -380,6 +382,26 @@ jobs:
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
           done
+
+      # `bundle deploy` syncs source files but does not build anything. Each
+      # apx project's React UI builds to `src/<pkg>/__dist__/` (gitignored),
+      # and the FastAPI factory only mounts the SPA when that directory is
+      # present at runtime. Without this, the preview app would serve the
+      # BFF/API only and 404 on every page route. See
+      # `scripts/build-frontends.sh` and the `sync.include` block in
+      # `databricks.yml`. apx delegates the install + vite invocation to
+      # bun, so bun is a hard prereq.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
 
       - name: Deploy preview bundle
         env:

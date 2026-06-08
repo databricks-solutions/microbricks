@@ -4,6 +4,23 @@ bundle:
 include:
   - resources/*.yml
 
+# Force-include each apx project's built UI in `bundle deploy`, even though
+# the directories are gitignored. Each apx project (today: `frontend/hc-portal/`;
+# tomorrow: any sibling under `frontend/`) builds its React bundle to
+# `src/<package_slug>/__dist__/` via `apx frontend build`, and the FastAPI
+# factory only mounts the SPA when that directory is present at runtime
+# (see `frontend/hc-portal/src/hc_portal/backend/core/_factory.py`). The
+# build runs in CI before `bundle deploy` (see `scripts/build-frontends.sh`
+# and the `.github/workflows/*.yml` callers); without this `sync.include`,
+# the deploy would honor the per-project `.gitignore` exclusion of
+# `src/*/__dist__/` and ship a UI-less app.
+#
+# The glob is intentionally generic — a new `frontend/<other>/` project
+# with the same apx layout is picked up automatically with no edit here.
+sync:
+  include:
+    - frontend/*/src/*/__dist__/**
+
 variables:
   catalog:
     description: "Unity Catalog the apps read from. Overridden per target."

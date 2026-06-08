@@ -137,6 +137,26 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
 
+      # `bundle deploy` syncs source files but does not build anything. Each
+      # apx project's React UI builds to `src/<pkg>/__dist__/` (gitignored),
+      # and the FastAPI factory only mounts the SPA when that directory is
+      # present at runtime. Without this build step, the deployed app would
+      # serve the BFF/API only and 404 on every page route. See
+      # `scripts/build-frontends.sh` and the `sync.include` block in
+      # `databricks.yml` for the matching pieces. apx delegates the install
+      # + vite invocation to bun, so bun is a hard prereq.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
+
       - name: bundle deploy
         run: databricks bundle deploy -t dev
 
