@@ -23,21 +23,36 @@ def _clear_cache():
 
 
 def test_default_runtime_derivation_uses_app_url(monkeypatch):
+    # Canonical dev/test/prod deploy: app name is the bare `hc-portal`.
     monkeypatch.setenv(
         "DATABRICKS_APP_URL",
-        "https://hc-portal-dev-7474643727449861.aws.databricksapps.com",
+        "https://hc-portal-7474643727449861.aws.databricksapps.com",
     )
     monkeypatch.delenv("PATIENT_SVC_URL", raising=False)
 
     assert _base._resolve_base_url("patient") == (
-        "https://patient-dev-7474643727449861.aws.databricksapps.com"
+        "https://patient-7474643727449861.aws.databricksapps.com"
+    )
+
+
+def test_runtime_derivation_carries_pr_preview_suffix(monkeypatch):
+    # PR preview deploy: app name is `hc-portal-feat-<slug>`; siblings get
+    # the same `-feat-<slug>` suffix so the strip-and-prepend still works.
+    monkeypatch.setenv(
+        "DATABRICKS_APP_URL",
+        "https://hc-portal-feat-hc-123-7474643727449861.aws.databricksapps.com",
+    )
+    monkeypatch.delenv("PATIENT_SVC_URL", raising=False)
+
+    assert _base._resolve_base_url("patient") == (
+        "https://patient-feat-hc-123-7474643727449861.aws.databricksapps.com"
     )
 
 
 def test_explicit_override_beats_runtime_derivation(monkeypatch):
     monkeypatch.setenv(
         "DATABRICKS_APP_URL",
-        "https://hc-portal-dev-7474643727449861.aws.databricksapps.com",
+        "https://hc-portal-7474643727449861.aws.databricksapps.com",
     )
     monkeypatch.setenv(
         "PATIENT_SVC_URL", "https://patient-pr-1234.previews.example"
@@ -52,14 +67,14 @@ def test_explicit_override_beats_runtime_derivation(monkeypatch):
 def test_override_for_one_service_does_not_affect_others(monkeypatch):
     monkeypatch.setenv(
         "DATABRICKS_APP_URL",
-        "https://hc-portal-dev-7474643727449861.aws.databricksapps.com",
+        "https://hc-portal-7474643727449861.aws.databricksapps.com",
     )
     monkeypatch.setenv("PATIENT_SVC_URL", "http://localhost:8001")
     monkeypatch.delenv("PROVIDER_SVC_URL", raising=False)
 
     assert _base._resolve_base_url("patient") == "http://localhost:8001"
     assert _base._resolve_base_url("provider") == (
-        "https://provider-dev-7474643727449861.aws.databricksapps.com"
+        "https://provider-7474643727449861.aws.databricksapps.com"
     )
 
 

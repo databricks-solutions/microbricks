@@ -10,15 +10,17 @@ variables:
     default: "main"
 
   # Suffix appended to every app name. Empty by default, so the dev/test/prod
-  # deploys produce stable names like `patient-dev` / `hc-portal-test`. The
-  # PR-preview workflow overrides it to `-feat-<slug>`, yielding
-  # `patient-dev-feat-<slug>`. The BFF's runtime URL resolution
-  # (`frontend/hc-portal/src/hc_portal/clients/_base.py`) strips its own
-  # `hc-portal` prefix off the platform-injected `DATABRICKS_APP_URL`, so as
-  # long as every sibling app shares the same suffix shape, downstream URLs
-  # resolve correctly with no cross-app DAB wiring.
+  # deploys produce bare names like `patient` / `hc-portal` (each env lives
+  # in its own workspace, so the namespaces don't collide). The PR-preview
+  # workflow overrides it to `-feat-<slug>`, yielding `patient-feat-<slug>`
+  # alongside the canonical `patient` in the dev workspace. The BFF's runtime
+  # URL resolution (`frontend/hc-portal/src/hc_portal/clients/_base.py`)
+  # strips its own `hc-portal` prefix off the platform-injected
+  # `DATABRICKS_APP_URL`, so as long as every sibling app shares the same
+  # suffix shape, downstream URLs resolve correctly with no cross-app DAB
+  # wiring.
   app_name_suffix:
-    description: "Optional suffix appended to every app name. Empty for stable deploys; '-feat-<slug>' for per-PR previews."
+    description: "Optional suffix appended to every app name. Empty for stable dev/test/prod deploys; '-feat-<slug>' for per-PR previews."
     default: ""
 
   # The Lakebase branch each app's postgres resource attaches to. Defaults to
@@ -41,12 +43,14 @@ variables:
 targets:
   # `dev` covers two related deploy shapes:
   #   1. The "trunk dev" deploy on every push to `develop`, with no overrides.
-  #      Produces apps like `patient-dev` bound to the long-lived `production`
-  #      Lakebase branch.
+  #      Produces apps like `patient` / `hc-portal` bound to the long-lived
+  #      `production` Lakebase branch (project `patient`, branch `production`).
   #   2. Per-PR preview deploys, where pr-validate.yml passes
   #      `--var app_name_suffix=-feat-<slug> --var lakebase_branch=feat-<slug>`.
-  #      Each preview lives at its own root_path (so concurrent PRs don't
-  #      stomp each other's bundle state) and its own Lakebase branch.
+  #      Produces apps like `patient-feat-<slug>` against the project's
+  #      `feat-<slug>` Lakebase branch. Each preview lives at its own
+  #      root_path (so concurrent PRs don't stomp each other's bundle state)
+  #      and its own Lakebase branch.
   dev:
     default: true
     mode: development

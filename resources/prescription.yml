@@ -3,7 +3,7 @@
 resources:
   apps:
     prescription_app:
-      name: prescription-${bundle.target}${var.app_name_suffix}
+      name: prescription${var.app_name_suffix}
       description: "System of record for active and historical prescriptions and the refill workflow."
       source_code_path: ../services/prescription
 
@@ -16,6 +16,6 @@ resources:
           description: "Prescription service Lakebase Autoscale project."
           postgres:
             # See databricks.yml for `lakebase_branch` semantics.
-            branch: projects/prescription-${bundle.target}/branches/${var.lakebase_branch}
-            database: projects/prescription-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            branch: projects/prescription/branches/${var.lakebase_branch}
+            database: projects/prescription/branches/${var.lakebase_branch}/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE

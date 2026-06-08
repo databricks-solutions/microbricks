@@ -12,8 +12,12 @@ resources:
   apps:
     patient_app:
       # `${var.app_name_suffix}` is empty for canonical dev/test/prod deploys
-      # and `-feat-<slug>` for per-PR preview deploys. See databricks.yml.
-      name: patient-${bundle.target}${var.app_name_suffix}
+      # (so the name is just `patient` in every workspace) and `-feat-<slug>`
+      # for per-PR preview deploys (`patient-feat-<slug>`). See databricks.yml.
+      # `${bundle.target}` is deliberately NOT in the name: each environment
+      # has its own workspace + Lakebase namespace, so the bare `patient`
+      # never collides across envs.
+      name: patient${var.app_name_suffix}
       description: "System of record for patient demographics, addresses, and consent."
       source_code_path: ../services/patient
 
@@ -39,7 +43,9 @@ resources:
           postgres:
             # branch resolves to `production` for test/prod targets and to the
             # current git branch's slug (`feat-<slug>`) for per-feature dev
-            # deploys. See `lakebase_branch` in databricks.yml.
-            branch: projects/patient-${bundle.target}/branches/${var.lakebase_branch}
-            database: projects/patient-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            # deploys. See `lakebase_branch` in databricks.yml. The project
+            # name is just `patient` (no `${bundle.target}` suffix): each
+            # workspace's Lakebase namespace is independent.
+            branch: projects/patient/branches/${var.lakebase_branch}
+            database: projects/patient/branches/${var.lakebase_branch}/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE

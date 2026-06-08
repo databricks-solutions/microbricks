@@ -58,7 +58,7 @@ jobs:
     # Settings -> Environments -> prod.
     environment:
       name: prod
-      url: https://hc-portal-prod.databricksapps.com
+      url: https://hc-portal.databricksapps.com
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,7 +107,7 @@ jobs:
           for svc in patient provider appointment lab prescription billing; do
             echo "→ Migrating $svc against prod/production"
             cd "services/$svc"
-            ENDPOINT="projects/$svc-prod/branches/production/endpoints/primary"
+            ENDPOINT="projects/$svc/branches/production/endpoints/primary"
             HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
@@ -122,11 +122,89 @@ jobs:
       - name: bundle deploy
         run: databricks bundle deploy -t prod
 
-      - name: Smoke test
+      - name: bundle run (submit a new app deployment for each app, in parallel)
+        # See deploy-dev.yml for the rationale + parallelization shape.
+        run: |
+          set -euo pipefail
+          LOG_DIR=$(mktemp -d)
+          KEYS=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+          PIDS=()
+          for KEY in "${KEYS[@]}"; do
+            ( databricks bundle run -t prod "$KEY" ) > "$LOG_DIR/$KEY.log" 2>&1 &
+            PID=$!
+            PIDS+=("$PID")
+            echo "→ kicked $KEY (pid=$PID)"
+          done
+          FAIL=0
+          for i in "${!KEYS[@]}"; do
+            KEY="${KEYS[$i]}"
+            if wait "${PIDS[$i]}"; then
+              echo "✓ $KEY"
+              tail -3 "$LOG_DIR/$KEY.log" | sed 's/^/    /'
+            else
+              echo "::error::$KEY failed; full log:"
+              cat "$LOG_DIR/$KEY.log"
+              FAIL=1
+            fi
+          done
+          rm -rf "$LOG_DIR"
+          (( FAIL == 0 )) || exit 1
+
+      - name: Wait for RUNNING state
         run: |
           set -euo pipefail
           for app in patient provider appointment lab prescription billing hc-portal; do
-            URL=$(databricks apps get "$app-prod" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
-            echo "Smoke: $app -> $URL"
-            curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
+            for i in $(seq 1 20); do
+              STATE=$(databricks apps get "$app" -p hc-prod -o json \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
+              echo "  $app attempt $i/20: state=$STATE"
+              if [[ "$STATE" == "RUNNING" ]]; then
+                break
+              fi
+              if (( i == 20 )); then
+                echo "::error::$app did not reach RUNNING within 5 minutes"
+                exit 1
+              fi
+              sleep 15
+            done
           done
+
+      - name: Smoke test (honest /healthz check)
+        # See deploy-dev.yml for the full rationale. Same SP-token + strict
+        # status + body assertion shape.
+        run: |
+          set -euo pipefail
+          TOKEN=$(databricks auth token -p hc-prod -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          assert_healthz() {
+            local app="$1" path="$2"
+            local url body_file http_code body
+            url=$(databricks apps get "$app" -p hc-prod -o json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            if [[ -z "$url" ]]; then
+              echo "::error::$app has no URL"
+              return 1
+            fi
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 30 \
+              -H "Authorization: Bearer $TOKEN" \
+              "$url$path")
+            body=$(cat "$body_file"); rm -f "$body_file"
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::$app $path -> HTTP $http_code (expected 200)"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            if [[ "$body" != '{"ok":true}' ]]; then
+              echo "::error::$app $path -> 200 but body mismatch:"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            echo "✓ $app $path -> 200 $body"
+          }
+          FAIL=0
+          for app in patient provider appointment lab prescription billing; do
+            assert_healthz "$app" "/api/v1/healthz" || FAIL=1
+          done
+          assert_healthz hc-portal "/api/bff/healthz" || FAIL=1
+          (( FAIL == 0 )) || exit 1

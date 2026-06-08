@@ -11,12 +11,14 @@ adapted to resolve downstream service URLs in this order:
 
   2. **Runtime-derived default**: compose from the BFF's own runtime
      context. Apps platform injects `DATABRICKS_APP_URL` on every running
-     app, e.g. `https://hc-portal-dev-7474643727449861.aws.databricksapps.com`.
-     Sibling services share the same `<target>-<workspace_id>.<region>.databricksapps.com`
-     tail and follow the `<svc>-<target>` naming pattern, so we strip our
-     own `hc-portal` prefix off the host and prepend the service slug.
-     This means a fresh-clone deploy works without any cross-app URL wiring
-     in the bundle.
+     app, e.g. `https://hc-portal-7474643727449861.aws.databricksapps.com`
+     (trunk dev/test/prod) or
+     `https://hc-portal-feat-<slug>-7474643727449861.aws.databricksapps.com`
+     (PR preview). Sibling services share the same `[-<suffix>]-<workspace_id>.<region>.databricksapps.com`
+     tail — every app in this bundle is named `<svc>` (or `<svc>-feat-<slug>`
+     for previews), so we strip our own `hc-portal` prefix off the host and
+     prepend the service slug. This means a fresh-clone deploy works
+     without any cross-app URL wiring in the bundle.
 
 Every concrete client (`PatientClient`, `ProviderClient`, ...) extends this
 and passes the bare service slug (`patient`, `provider`, ...).
@@ -37,20 +39,22 @@ from urllib.parse import urlparse
 
 import httpx
 
-# Our own app name is `hc-portal-<target>`. Every sibling service is
-# `<svc>-<target>`. We strip this prefix off our own host to recover the
-# `-<target>-<workspace_suffix>` tail and prepend each service slug.
+# Our own app name is `hc-portal` (or `hc-portal-feat-<slug>` for previews).
+# Every sibling service is `<svc>` (or `<svc>-feat-<slug>`). We strip this
+# prefix off our own host to recover the `[-feat-<slug>]-<workspace_suffix>`
+# tail and prepend each service slug.
 _OWN_APP_PREFIX = "hc-portal"
 
 
 @functools.lru_cache(maxsize=1)
 def _own_app_suffix() -> str:
-    """Return the host tail shared by every app in this workspace+target.
+    """Return the host tail shared by every app in this workspace.
 
-    Example: if the BFF runs at
-        https://hc-portal-dev-7474643727449861.aws.databricksapps.com
-    this returns
-        -dev-7474643727449861.aws.databricksapps.com
+    Examples:
+        BFF at https://hc-portal-7474643727449861.aws.databricksapps.com
+            -> -7474643727449861.aws.databricksapps.com
+        BFF at https://hc-portal-feat-foo-7474643727449861.aws.databricksapps.com
+            -> -feat-foo-7474643727449861.aws.databricksapps.com
     so callers can prepend a service slug like `patient`.
 
     Cached because it never changes within a process.
@@ -61,7 +65,7 @@ def _own_app_suffix() -> str:
             f"DATABRICKS_APP_URL host {host!r} does not start with "
             f"expected app prefix '{_OWN_APP_PREFIX}-'."
         )
-    return host[len(_OWN_APP_PREFIX) :]  # leaves "-<target>-<workspace_suffix>"
+    return host[len(_OWN_APP_PREFIX) :]  # leaves "[-feat-<slug>]-<workspace_suffix>"
 
 
 def _resolve_base_url(service_slug: str) -> str:

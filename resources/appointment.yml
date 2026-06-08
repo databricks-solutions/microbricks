@@ -3,7 +3,7 @@
 resources:
   apps:
     appointment_app:
-      name: appointment-${bundle.target}${var.app_name_suffix}
+      name: appointment${var.app_name_suffix}
       description: "System of record for scheduled and historical visits, open slots, and visit types."
       source_code_path: ../services/appointment
 
@@ -16,6 +16,6 @@ resources:
           description: "Appointment service Lakebase Autoscale project."
           postgres:
             # See databricks.yml for `lakebase_branch` semantics.
-            branch: projects/appointment-${bundle.target}/branches/${var.lakebase_branch}
-            database: projects/appointment-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            branch: projects/appointment/branches/${var.lakebase_branch}
+            database: projects/appointment/branches/${var.lakebase_branch}/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE

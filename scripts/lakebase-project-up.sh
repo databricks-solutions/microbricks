@@ -39,7 +39,11 @@ SERVICE="$1"
 ENV="$2"
 PROFILE="${3:-hc-$ENV}"
 
-PROJECT_ID="$SERVICE-$ENV"
+# Project ID is just the bare service name. Each env lives in its own
+# workspace, so the Lakebase namespace is independent per env — there's no
+# cross-env collision risk for a project named `patient`. `<env>` is kept
+# in the script signature purely to derive the default profile.
+PROJECT_ID="$SERVICE"
 PROJECT_PATH="projects/$PROJECT_ID"
 
 PRODUCTION_BRANCH_PATH="$PROJECT_PATH/branches/production"

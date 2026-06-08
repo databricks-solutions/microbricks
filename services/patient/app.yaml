@@ -29,7 +29,7 @@ env:
   # is declared in resources/patient.yml. Don't shadow them here.
   #
   # ENDPOINT_NAME is the Lakebase endpoint path (e.g.
-  # `projects/patient-dev/branches/production/endpoints/primary`) used by
+  # `projects/patient/branches/production/endpoints/primary`) used by
   # `db.py` to mint per-connection OAuth credentials. `valueFrom: patient_db`
   # resolves the postgres resource (whose name matches the resources entry
   # in resources/patient.yml) to its endpoint path.

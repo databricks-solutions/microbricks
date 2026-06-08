@@ -6,8 +6,8 @@ name: nightly-orphan-cleanup
 # but reaping them sooner keeps the dev workspace tidy and lowers idle compute.
 #
 # Algorithm:
-#   1. List every Lakebase branch under each <svc>-dev project that starts
-#      with `feat-` or `hotfix-`.
+#   1. List every Lakebase branch under each `<svc>` project (in the dev
+#      workspace) that starts with `feat-` or `hotfix-`.
 #   2. List every open PR + every recently-closed-but-unprocessed PR.
 #      Compute the expected slug for each.
 #   3. Anything in (1) whose slug is NOT in (2) is orphaned -> delete via
@@ -98,8 +98,8 @@ jobs:
         run: |
           set -euo pipefail
           for svc in patient provider appointment lab prescription billing; do
-            echo "→ Scanning projects/$svc-dev"
-            BRANCHES=$(databricks postgres list-branches "projects/$svc-dev" -p hc-dev -o json 2>/dev/null \
+            echo "→ Scanning projects/$svc"
+            BRANCHES=$(databricks postgres list-branches "projects/$svc" -p hc-dev -o json 2>/dev/null \
               | python3 -c 'import json,sys; [print(b["name"]) for b in json.load(sys.stdin)]' \
               | grep -E '^(feat|hotfix)-' || true)
             for branch in $BRANCHES; do

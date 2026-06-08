@@ -32,7 +32,7 @@ case "$SLUG" in
   *)               BRANCH="feat-$SLUG" ;;
 esac
 
-PROJECT="projects/$SERVICE-dev"
+PROJECT="projects/$SERVICE"
 BRANCH_PATH="$PROJECT/branches/$BRANCH"
 ENDPOINT_PATH="$BRANCH_PATH/endpoints/primary"
 
