@@ -26,6 +26,8 @@
 # Frontend / BFF
 /frontend/                                              @erinaldidb
 /resources/hc-portal.yml                                @erinaldidb
+/frontend/clinic-sim/                                   @erinaldidb
+/resources/clinic-sim.yml                               @erinaldidb
 
 # Skills — repo owner gates
 /.claude/skills/                                        @erinaldidb

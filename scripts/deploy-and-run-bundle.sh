@@ -82,8 +82,10 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 
 # The bundle resource keys for every app. Order matters: services first so
-# the BFF (hc_portal_app) can ACL-attach to running siblings — same order
-# the bundle itself prefers.
+# the BFFs (hc_portal_app, clinic_sim_app) can ACL-attach to running
+# siblings — same order the bundle itself prefers. Both BFFs go last; they
+# both fan out to the six services and have no inter-BFF dependency, so
+# their relative order doesn't matter.
 APP_KEYS=(
   patient_app
   provider_app
@@ -92,6 +94,7 @@ APP_KEYS=(
   prescription_app
   billing_app
   hc_portal_app
+  clinic_sim_app
 )
 
 log()  { printf '\n┃ %s\n' "$*"; }

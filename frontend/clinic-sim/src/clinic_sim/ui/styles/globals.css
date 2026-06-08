@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(0.99 0.005 240);
+  --foreground: oklch(0.18 0.02 240);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 240);
+  --muted: oklch(0.96 0.005 240);
+  --muted-foreground: oklch(0.5 0.02 240);
+  --primary: oklch(0.55 0.18 250);
+  --primary-foreground: oklch(0.99 0 0);
+  --accent: oklch(0.72 0.13 175);
+  --accent-foreground: oklch(0.15 0.02 175);
+  --success: oklch(0.72 0.16 145);
+  --warning: oklch(0.78 0.16 75);
+  --danger: oklch(0.62 0.22 25);
+  --border: oklch(0.9 0.01 240);
+  --radius: 0.75rem;
+
+  --clinic-bg: oklch(0.97 0.01 230);
+  --clinic-wall: oklch(0.84 0.02 230);
+  --clinic-floor: oklch(0.99 0.005 240);
+
+  --room-reception: oklch(0.95 0.05 220);
+  --room-waiting: oklch(0.95 0.05 80);
+  --room-exam: oklch(0.95 0.05 145);
+  --room-lab: oklch(0.95 0.05 275);
+  --room-pharmacy: oklch(0.95 0.05 25);
+  --room-checkout: oklch(0.95 0.05 175);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-border: var(--border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+/* Subtle scrolling-strip pattern for the clinic floor */
+.floor-tile {
+  background-image:
+    linear-gradient(45deg, oklch(0.94 0.005 240) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.94 0.005 240) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.94 0.005 240) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.94 0.005 240) 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+
+.glass {
+  background: color-mix(in oklch, var(--card) 80%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.avatar-walk {
+  animation: bob 0.5s ease-in-out infinite;
+}

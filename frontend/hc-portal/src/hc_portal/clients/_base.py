@@ -1,4 +1,4 @@
-"""Base class for typed per-service BFF clients.
+"""Base class and shared shapes for typed per-service BFF clients.
 
 Verbatim from `.claude/skills/hc-obo-auth/references/canonical-patterns.md`,
 adapted to resolve downstream service URLs in this order:
@@ -35,9 +35,28 @@ from __future__ import annotations
 
 import functools
 import os
+from typing import Generic, TypeVar
 from urllib.parse import urlparse
 
 import httpx
+from pydantic import BaseModel
+
+T = TypeVar("T")
+
+
+class Page(BaseModel, Generic[T]):
+    """Paginated list envelope returned by every backend list endpoint.
+
+    `total` is the unfiltered row count for the current filter+search
+    predicate (not the size of `items`). The BFF can drive a "page N of M"
+    control without a second `/count` round-trip — and the dashboard's
+    aggregate counts still come from the dedicated `/count` endpoints.
+    """
+
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
 
 # Our own app name is `hc-portal` (or `hc-portal-feat-<slug>` for previews).
 # Every sibling service is `<svc>` (or `<svc>-feat-<slug>`). We strip this
