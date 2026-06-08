@@ -213,7 +213,7 @@ After merge to `main`, tag and deploy to prod the same way as a release. Then me
 
 ## Running CI locally (`scripts/ci-local.sh`)
 
-The GitHub Actions workflows under `.github/workflows/` are the source of truth for the deploy pipeline. GH-hosted runners can't reach the dev workspace today (FE-VM's managed IP allowlist blocks them — see the `github-runner-ip-acl` memory note); use `scripts/ci-local.sh` to run the same logical pipelines from your workstation, where your IP is already allowlisted.
+The GitHub Actions workflows under `.github/workflows/` are the source of truth for the deploy pipeline; they authenticate via M2M (service-principal `client_credentials`), build every apx frontend with `scripts/build-frontends.sh`, run `bundle deploy` followed by parallel `bundle run` per app, and resolve canonical Apps URLs from `databricks apps get`. `scripts/ci-local.sh` runs the same logical pipelines from your workstation against your `~/.databrickscfg` profile — useful for the bootstrap path, for recovery, and as a fallback if a workspace's IP allowlist blocks GH-hosted runner egress (see the `github-runner-ip-acl` finding).
 
 **The script mirrors the workflow files step-for-step. The intended division of labor is:**
 
@@ -244,6 +244,13 @@ The two are intentionally isolated in the bundle: previews override `app_name_su
 ./scripts/ci-local.sh nightly-cleanup
 ```
 
+For ad-hoc redeploys outside the full pipeline, `scripts/deploy-and-run-bundle.sh` wraps `bundle deploy` + per-app `bundle run` into one verb (with `--only=<apps>` / `--skip-deploy` / `--restart` / `--no-wait` / `--var KEY=VALUE` passthrough). Use it when iterating on a subset of services without re-running migrations and smoke tests:
+
+```bash
+# Roll a new app deployment for patient + lab against an already-deployed bundle
+./scripts/deploy-and-run-bundle.sh dev --skip-deploy --restart --only=patient,lab
+```
+
 `pr-validate` and `pr-cleanup` use `hc-dev`. `deploy` picks `hc-{dev,test,prod}` based on the target. All subcommands fail fast if the corresponding profile is missing or invalid in `~/.databrickscfg` — run `databricks auth login -p hc-<env>` if so.
 
 **Footgun: don't run `deploy dev` and `pr-validate` back-to-back on the same machine.** DAB caches terraform state locally at `.databricks/bundle/<target>/` keyed only by target name, so two `-t dev` runs (trunk + preview) clobber each other's cache. In CI this never happens (each runner is ephemeral). On a single dev machine, pick one or the other, or `rm -rf .databricks/bundle/dev/` between them.
@@ -271,6 +278,9 @@ The BFF must continue calling `v1` until it's been updated to call `v2`. Both ve
 | Deploy to dev/test/prod | `.claude/skills/hc-dab-deployment/` |
 | Add a BFF aggregation route | `.claude/skills/hc-bff-pattern/` |
 | Cut a release / hotfix | `.claude/skills/hc-gitflow-cicd/` |
+| Build all apx frontends before deploy | `scripts/build-frontends.sh` |
+| `bundle deploy` + start every app in one verb | `scripts/deploy-and-run-bundle.sh` |
+| Emulate a workflow locally | `scripts/ci-local.sh` |
 
 Open the repo in Claude Code; the skills are auto-discovered.
 

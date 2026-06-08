@@ -74,7 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: test
-      url: https://hc-portal.databricksapps.com
+      # Resolved at step-completion time from `databricks apps get`. The
+      # short-form hostname is NOT the canonical URL — the real one embeds
+      # the workspace ID. See the `portal-url` step below.
+      url: ${{ steps.portal-url.outputs.url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -246,3 +249,13 @@ jobs:
           done
           assert_healthz hc-portal "/api/bff/healthz" || FAIL=1
           (( FAIL == 0 )) || exit 1
+
+      - name: Resolve hc-portal URL for environment link
+        id: portal-url
+        # See deploy-dev.yml for the rationale.
+        run: |
+          set -euo pipefail
+          URL=$(databricks apps get hc-portal -p hc-test -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Resolved hc-portal URL: $URL"

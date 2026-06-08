@@ -268,8 +268,11 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: dev
-      # Comment shape — populated below.
-      url: https://hc-portal-${{ needs.detect-changes.outputs.slug }}.databricksapps.com
+      # Resolved at step-completion time from `databricks apps get`. The
+      # short-form hostname (`hc-portal-<slug>.databricksapps.com`) is NOT
+      # the canonical URL — the real one embeds the workspace ID — so we
+      # let the apps API tell us. See the `urls` step below.
+      url: ${{ steps.urls.outputs.portal_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -541,11 +544,43 @@ jobs:
           assert_healthz "hc-portal-$SLUG" "/api/bff/healthz" || FAIL=1
           (( FAIL == 0 )) || exit 1
 
+      - name: Collect preview app URLs
+        id: urls
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+        # The "pretty" hostname (e.g. patient-feat-x.databricksapps.com) is NOT
+        # the real URL — Databricks Apps embeds the workspace ID into the
+        # hostname (e.g. patient-feat-x-7405606704848118.18.azure.databricksapps.com).
+        # We can't construct that on our own, so we ask the apps API for the
+        # canonical `url` field (same source the smoke-test step uses) and
+        # emit a JSON map keyed by the *bare* service name for the comment
+        # step to consume.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, subprocess
+          slug = os.environ["SLUG"]
+          services = ["patient","provider","appointment","lab","prescription","billing","hc-portal"]
+          urls = {}
+          for s in services:
+              app = f"{s}-{slug}"
+              out = subprocess.check_output(
+                  ["databricks","apps","get",app,"-p","hc-dev","-o","json"],
+                  text=True,
+              )
+              urls[s] = json.loads(out).get("url","") or ""
+          print(f"map={json.dumps(urls)}")
+          print(f"portal_url={urls.get('hc-portal','')}")
+          PY
+
       - name: Comment preview URLs on PR
         uses: actions/github-script@v7
+        env:
+          URLS_JSON: ${{ steps.urls.outputs.map }}
         with:
           script: |
             const slug = '${{ needs.detect-changes.outputs.slug }}';  // already prefixed: e.g. "feat-hc-123"
+            const urls = JSON.parse(process.env.URLS_JSON || '{}');
             const services = ['patient','provider','appointment','lab','prescription','billing','hc-portal'];
             const body = [
               '### 🔬 Preview deploy ready',
@@ -555,7 +590,7 @@ jobs:
               '',
               '| App | URL |',
               '|---|---|',
-              ...services.map(s => `| \`${s}-${slug}\` | https://${s}-${slug}.databricksapps.com |`),
+              ...services.map(s => `| \`${s}-${slug}\` | ${urls[s] || `https://${s}-${slug}.databricksapps.com`} |`),
               '',
               'Login with your Databricks user; the BFF forwards your OBO token to each backend.',
               '',

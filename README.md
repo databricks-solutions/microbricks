@@ -1,12 +1,18 @@
+<p align="center">
+  <img src="docs/brand/microbricks-logo.jpg" alt="microbricks — powered by Databricks" width="640">
+</p>
 
+<p align="center">
+  <em>A solution accelerator for building microservices on Databricks.</em>
+</p>
 
-# microbricks
+---
 
-A reference architecture demonstrating how to build **microservices on Databricks** using **Databricks Apps** for the runtime, **Lakebase Autoscale Postgres** for per-service state, **OBO authentication** for end-to-end user identity, and **DABs + GitHub Actions** for CI/CD across dev/test/prod.
+**microbricks** demonstrates how to build microservices on Databricks using **Databricks Apps** for the runtime, **Lakebase Autoscale Postgres** for per-service state, **OBO authentication** for end-to-end user identity, and **DABs + GitHub Actions** for CI/CD across dev/test/prod.
 
 The demo domain is healthcare: six backend services that loosely follow HL7 FHIR resource boundaries, plus one frontend portal with an in-process BFF.
 
-> **Status:** Phases 1–7 complete — six backend services + the BFF + the DAB bundle + six GitHub Actions workflows are all in place; dev is end-to-end runnable via `scripts/ci-local.sh`. The remaining work (Phase 8) is unblocking GH-hosted runners against the dev workspace's IP allowlist, then a clone-to-demo polish pass. See `[ROADMAP.md](ROADMAP.md)` for the full phase breakdown and [open work](#open-work) for what's next.
+> **Status:** Phases 1–7 complete — six backend services + the BFF + the DAB bundle + six GitHub Actions workflows are all in place. The workflows now run end-to-end against the dev workspace via M2M (service-principal) auth, build every apx frontend, deploy all seven apps in parallel, and resolve each app's canonical URL (with workspace ID) from the apps API. Dev is also fully runnable from a workstation via `scripts/ci-local.sh`. See [`ROADMAP.md`](ROADMAP.md) for the full phase breakdown and [open work](#open-work) for what's next.
 
 ---
 
@@ -23,21 +29,22 @@ Browser  →  hc-portal (frontend + BFF)  →  6 backend services  →  6 Lakeba
 - **OBO auth** end-to-end. Every Postgres connection is opened with the calling user's OAuth credential, so Unity Catalog enforces access at the data layer.
 - **No backend-to-backend calls.** The BFF is the only place where data from multiple services is joined.
 
-Detailed architecture: `[ARCHITECTURE.md](ARCHITECTURE.md)`. Data model: `[HEALTHCARE_DATA_MODEL.md](HEALTHCARE_DATA_MODEL.md)`. Implementation plan: `[ROADMAP.md](ROADMAP.md)`.
+Detailed architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md). Data model: [`HEALTHCARE_DATA_MODEL.md`](HEALTHCARE_DATA_MODEL.md). Implementation plan: [`ROADMAP.md`](ROADMAP.md). Brand assets: [`docs/brand/`](docs/brand/README.md).
 
 ---
 
 ## Prerequisites
 
+| Tool              | Min version | Install                                                                |
+| ----------------- | ----------- | ---------------------------------------------------------------------- |
+| Databricks CLI    | `1.2.1`     | `brew install databricks` (the GitHub Actions workflows pin `1.2.1`)   |
+| `apx`             | latest      | `curl -fsSL https://databricks-solutions.github.io/apx/install.sh \| sh` |
+| `uv`              | latest      | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                       |
+| `bun`             | latest      | `curl -fsSL https://bun.sh/install \| bash`                              |
+| `gh`              | latest      | `brew install gh`                                                      |
+| `psql` (optional) | 16          | `brew install postgresql@16`                                           |
 
-| Tool              | Min version | Install                                                                                                                    |
-| ----------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Databricks CLI    | `0.295.0`   | `brew install databricks`                                                                                                  |
-| `apx`             | latest      | `curl -fsSL [https://databricks-solutions.github.io/apx/install.sh](https://databricks-solutions.github.io/apx/install.sh) |
-| `uv`              | latest      | `curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh)                                             |
-| `bun`             | latest      | `curl -fsSL [https://bun.sh/install](https://bun.sh/install)                                                               |
-| `gh`              | latest      | `brew install gh`                                                                                                          |
-| `psql` (optional) | 16          | `brew install postgresql@16`                                                                                               |
+`apx` + `bun` are needed at deploy time (CI and local) because each apx project's React UI is built into `src/<pkg>/__dist__/` before `bundle deploy` — see [`scripts/build-frontends.sh`](scripts/build-frontends.sh).
 
 
 Three Databricks workspaces (FE-VM serverless type, required for Lakebase + Apps):
@@ -71,7 +78,8 @@ cd microbricks
 databricks bundle validate -t dev
 
 # 3. Bootstrap dev: lint + tests + provision 6 Lakebase projects + alembic +
-#    `bundle deploy -t dev`. ci-local.sh wraps every step the GitHub Actions
+#    build frontend UIs + `bundle deploy -t dev` + `bundle run` per app +
+#    /healthz smoke. ci-local.sh wraps every step the GitHub Actions
 #    `deploy-dev.yml` workflow runs in CI.
 ./scripts/ci-local.sh deploy dev
 
@@ -80,7 +88,20 @@ databricks bundle validate -t dev
 make seed-dev
 ```
 
-The seven dev apps (`patient-dev` … `billing-dev`, `hc-portal-dev`) come up STOPPED and scale-to-zero after 1h idle. Hitting any of their URLs warms them.
+The seven dev apps (`patient`, `provider`, `appointment`, `lab`, `prescription`, `billing`, `hc-portal`) come up RUNNING — the `bundle run` step in CI submits an app deployment per app in parallel and waits for `RUNNING` state. Lakebase endpoints scale to zero after 1h idle, so an inactive dev environment is ~$0.
+
+Already have a deployed bundle and just want to (re-)launch the apps? Use the standalone helper:
+
+```bash
+# Plain trunk-dev: deploy bundle, then start all seven apps (parallel-friendly)
+./scripts/deploy-and-run-bundle.sh dev
+
+# Already deployed — just kick a new app deployment per app
+./scripts/deploy-and-run-bundle.sh dev --skip-deploy --restart
+
+# Iterate on a subset
+./scripts/deploy-and-run-bundle.sh dev --only=patient,lab
+```
 
 For the per-PR / per-feature-branch workflow:
 
@@ -125,12 +146,19 @@ See `CONTRIBUTING.md` "Running CI locally" for the full reference. Every step ca
 ├── scripts/
 │   ├── ci-local.sh                 # Local CI emulator — pr-validate / pr-cleanup /
 │   │                               #     deploy {dev,test,prod} / nightly-cleanup
+│   ├── build-frontends.sh          # Auto-discovers apx projects under frontend/
+│   │                               #     and runs `apx frontend build` for each
+│   ├── deploy-and-run-bundle.sh    # `bundle deploy` + per-app `bundle run` in
+│   │                               #     one verb (with --only / --skip-deploy /
+│   │                               #     --restart / --no-wait / --var passthrough)
 │   ├── sanitize-branch-slug.sh     # Code-branch -> Lakebase-/preview-slug transform
 │   ├── lakebase-project-{up,down}.sh   # Per-env Lakebase project lifecycle
 │   ├── lakebase-branch-{up,down}.sh    # Per-feature-branch lifecycle
 │   └── seeds/                      # Shared seed primitives (deterministic UUIDs)
 ├── tests/seeds/                    # Cross-service ID-stability tests (no DB needed)
-├── docs/diagrams/                  # *.drawio + exported *.png
+├── docs/
+│   ├── brand/                      # Logo + icon + Photoshop source
+│   └── diagrams/                   # *.drawio + exported *.png
 ├── .github/
 │   ├── workflows/                  # 6 workflows: pr-validate, pr-cleanup,
 │   │                               # deploy-{dev,test,prod}, nightly-orphan-cleanup
@@ -166,35 +194,39 @@ The repo ships six project-local skills under `.claude/skills/`. Each one codifi
 
 ## CI/CD
 
-The repo ships six workflows under `.github/workflows/`:
+The repo ships six workflows under `.github/workflows/`, all pinned to Databricks CLI `1.2.1`:
 
+| Workflow                     | Trigger                                           | What it does                                                                                                                                                                                                                                                                                  |
+| ---------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr-validate.yml`            | PR open/sync against `develop`/`release/*`/`main` | Path-scoped matrix: lint + unit tests for changed services, BFF tests, bundle-validate, provision per-feature Lakebase branches, alembic, build apx frontends, parallel `bundle deploy` + per-app `bundle run`, /healthz smoke, resolve canonical URLs from the apps API, comment URLs on PR |
+| `pr-cleanup.yml`             | PR close (merged or not)                          | `bundle destroy` of the preview + tear down 6 Lakebase feature branches                                                                                                                                                                                                                       |
+| `deploy-dev.yml`             | Push to `develop`                                 | Same shape (no path filter, all six services + portal): alembic on `production` branches, build frontends, `bundle deploy -t dev`, parallel `bundle run` per app, wait for `RUNNING`, /healthz smoke                                                                                          |
+| `deploy-test.yml`            | Push to `release/*` or `main`                     | Same shape, `-t test`                                                                                                                                                                                                                                                                         |
+| `deploy-prod.yml`            | Push tag `v*` on `main`                           | Same shape, `-t prod`, gated by manual approval on the `prod` GitHub environment                                                                                                                                                                                                              |
+| `nightly-orphan-cleanup.yml` | Daily cron (04:17 UTC) + manual                   | GC Lakebase feature branches whose PR is closed                                                                                                                                                                                                                                               |
 
-| Workflow                     | Trigger                                           | What it does                                                                                                                                                                                 |
-| ---------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pr-validate.yml`            | PR open/sync against `develop`/`release/*`/`main` | Path-scoped matrix: lint + unit tests for changed services, BFF tests, bundle-validate, provision per-feature Lakebase branches, alembic, deploy preview apps, smoke, comment URLs on the PR |
-| `pr-cleanup.yml`             | PR close (merged or not)                          | `bundle destroy` of the preview + tear down 6 Lakebase feature branches                                                                                                                      |
-| `deploy-dev.yml`             | Push to `develop`                                 | `bundle deploy -t dev`, alembic against `production` branches, smoke 7 apps                                                                                                                  |
-| `deploy-test.yml`            | Push to `release/*` or `main`                     | Same shape, `-t test`                                                                                                                                                                        |
-| `deploy-prod.yml`            | Push tag `v*` on `main`                           | Same shape, `-t prod`, gated by manual approval on the `prod` GitHub environment                                                                                                             |
-| `nightly-orphan-cleanup.yml` | Daily cron (04:17 UTC) + manual                   | GC Lakebase feature branches whose PR is closed                                                                                                                                              |
+A few details worth knowing:
 
+- **Auth: M2M (service-principal) via the OAuth `client_credentials` flow.** Each deploy job writes a `~/.databrickscfg` profile (`hc-dev` / `hc-test` / `hc-prod`) from `vars.DATABRICKS_HOST_<ENV>` + `secrets.DATABRICKS_CLIENT_ID` + `secrets.DATABRICKS_CLIENT_SECRET` scoped to the matching GitHub environment. Smoke tests mint a short-lived bearer by POSTing `client_credentials` to `${DATABRICKS_HOST}/oidc/v1/token` (no PATs, no `databricks auth token` — that's U2M-only). OIDC trust is the documented migration path; the inline rationale lives in `pr-validate.yml`.
+- **Frontends are built in CI.** `scripts/build-frontends.sh` auto-discovers every apx project under `frontend/` (anything with both `pyproject.toml` and `package.json`) and runs `apx frontend build` — `bundle deploy` only syncs files, so without this step the deployed app would 404 on every page route. The bundle force-includes the resulting `src/<pkg>/__dist__/` via `sync.include` in `databricks.yml`.
+- **Apps deploy in parallel.** `bundle deploy` wires the cross-app `CAN_USE` ACLs at deploy-time, so the seven `bundle run` calls (six services + `hc-portal`) fire concurrently. Wall time becomes `max(app startup)` rather than `sum`. Each subshell logs to its own file so a failure surfaces a clean log instead of interleaved noise.
+- **Smoke tests are strict.** Both the status code AND the body are asserted (`200` + literal `{"ok":true}`) — Databricks Apps' OBO gateway returns 200-with-HTML for unauthenticated requests, which would fool a vanilla `curl -fsS`.
+- **Environment URLs come from the apps API.** The Apps platform embeds the workspace ID into each app hostname (e.g. `hc-portal-7405606704848118.18.azure.databricksapps.com`), so we can't construct it client-side. Each deploy workflow's final step calls `databricks apps get hc-portal -o json` and feeds the canonical URL into `environment.url` and (for previews) into the PR comment table.
 
-Auth is service-principal client-secret M2M, scoped to a per-environment GitHub secret (`secrets.DATABRICKS_CLIENT_{ID,SECRET}` resolves differently in `dev` / `test` / `prod` environments). OIDC migration path is documented inline in `pr-validate.yml`.
-
-> **Note:** the workflows currently can't reach the dev workspace from GH-hosted runners — FE-VM provisions a managed IP allowlist that doesn't include GitHub egress. Until Phase 8 picks an unblock (self-hosted runner inside FE-VM, parallel allowlist for GitHub IPs, or a dedicated CI workspace), `scripts/ci-local.sh` runs the same logical pipelines from a developer's machine where the IP is already allowlisted. See `CONTRIBUTING.md` "Running CI locally" for the dev/CI division of labor.
+> **Note:** GH-hosted runners may not reach the dev workspace if FE-VM's managed IP allowlist is in effect — see the `github-runner-ip-acl` finding. Where that's the case, `scripts/ci-local.sh` runs the same logical pipelines from a developer's machine where the IP is already allowlisted. See `CONTRIBUTING.md` "Running CI locally" for the dev/CI division of labor.
 
 ---
 
 ## Open work
 
-The phased plan in `[ROADMAP.md](ROADMAP.md)` is mostly done — phases 1-7 (six services + BFF + seed data + DAB bundle + dev rollout + workflows) are ✅. Phase 8 wraps it up:
+The phased plan in [`ROADMAP.md`](ROADMAP.md) is mostly done — phases 1-7 (six services + BFF + seed data + DAB bundle + dev rollout + workflows, including parallel `bundle run`, frontend build step in CI, M2M auth, and canonical URL resolution from the apps API) are ✅. Phase 8 wraps it up:
 
-- **Unblock CI ↔ Databricks** — pick one of the three options in the `github-runner-ip-acl` finding so the workflows actually fire against the workspace.
+- **Confirm CI ↔ Databricks reachability per env** — verify each workspace's IP allowlist (if any) admits GH-hosted runner egress; otherwise pick one of the three options in the `github-runner-ip-acl` finding.
 - **Fresh-clone test** — verify a stranger can go from `git clone` to a working PR with a preview app in under 30 minutes following only README + CONTRIBUTING.
 - **Runbooks** — `docs/runbooks/{prod-rollback,hotfix,lakebase-branch-orphan}.md`.
 - **Cost audit** — confirm idle endpoints scale to zero (already wired: 1h `suspend_timeout_duration` in `scripts/lakebase-project-up.sh` + `scripts/lakebase-branch-up.sh`); document expected dev-env monthly cost.
 
-Future / optional follow-ups (Phases 9–14 in `ROADMAP.md`): service-mesh observability, saga/events demo, RLS demo, read-replica for prod, multi-region, shared APX UI library.
+Future / optional follow-ups (Phases 9–14 in [`ROADMAP.md`](ROADMAP.md)): service-mesh observability, saga/events demo, RLS demo, read-replica for prod, multi-region, shared APX UI library.
 
 ---
 
