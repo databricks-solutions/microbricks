@@ -220,9 +220,20 @@ jobs:
         #   3. Assert HTTP status is EXACTLY 200 (not <400).
         #   4. Assert the body is EXACTLY {"ok":true} (catches OAuth HTML
         #      pages that come back with status 200).
+        #
+        # Why curl + /oidc/v1/token, not `databricks auth token`:
+        #   `databricks auth token` only supports U2M (refresh-token) auth.
+        #   We're authenticating as a service principal via M2M, so we hit
+        #   the workspace's OAuth token endpoint with the client_credentials
+        #   grant and `all-apis` scope — the same path the Databricks SDK
+        #   uses internally for M2M.
         run: |
           set -euo pipefail
-          TOKEN=$(databricks auth token -p hc-dev -o json \
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           assert_healthz() {
             local app="$1" path="$2"

@@ -469,9 +469,22 @@ jobs:
         # deployed app names carry the per-PR slug suffix.
         #
         # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
+        #
+        # Token minting note: we cannot use `databricks auth token` here —
+        # that command only supports U2M tokens, and CI authenticates as an
+        # SP via M2M (client_id + client_secret). Instead, we hit the
+        # workspace's OAuth endpoint with the client_credentials grant and
+        # `all-apis` scope, which is the M2M-equivalent path the SDK takes
+        # internally. The SP already has CAN_MANAGE on every preview app
+        # (created by its own `bundle deploy` above), so the gateway forwards
+        # the bearer through to /healthz.
         run: |
           set -euo pipefail
-          TOKEN=$(databricks auth token -p hc-dev -o json \
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           assert_healthz() {
             local app="$1" path="$2"
