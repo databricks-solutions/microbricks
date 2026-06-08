@@ -42,4 +42,4 @@ resources:
             # deploys. See `lakebase_branch` in databricks.yml.
             branch: projects/patient-${bundle.target}/branches/${var.lakebase_branch}
             database: projects/patient-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
-            permission: CAN_CONNECT
+            permission: CAN_CONNECT_AND_CREATE

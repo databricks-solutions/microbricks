@@ -96,9 +96,13 @@ jobs:
           done
 
       - name: Run migrations (production branches, all six services)
+        # No LOCAL_DEV_TOKEN export here: `databricks auth token` only works
+        # for U2M, and we authenticate as an SP via M2M in CI. The alembic
+        # env.py falls back to the SDK's default credential chain, which picks
+        # up DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET
+        # off the workflow env automatically.
         run: |
           set -euo pipefail
-          export LOCAL_DEV_TOKEN=$(databricks auth token -p hc-prod | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           export PGUSER=$(databricks current-user me -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
           for svc in patient provider appointment lab prescription billing; do
             echo "→ Migrating $svc against prod/production"

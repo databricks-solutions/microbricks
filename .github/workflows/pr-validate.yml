@@ -359,11 +359,12 @@ jobs:
         # applied; the COW from `production` carries them forward.
         run: |
           set -euo pipefail
-          # env.py uses LOCAL_DEV_TOKEN as a Databricks bearer token passed to
-          # WorkspaceClient(token=...) which then calls generate_database_credential
-          # itself.  We must supply a Databricks token here, NOT a Postgres credential.
-          LOCAL_DEV_TOKEN=$(databricks auth token -p hc-dev --output json | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
-          export LOCAL_DEV_TOKEN
+          # No LOCAL_DEV_TOKEN export here: `databricks auth token` only works
+          # for U2M, and we authenticate as an SP via M2M in CI. The alembic
+          # env.py falls back to the SDK's default credential chain, which
+          # picks up DATABRICKS_HOST + DATABRICKS_CLIENT_ID +
+          # DATABRICKS_CLIENT_SECRET off the workflow env automatically and
+          # then calls generate_database_credential itself.
           for svc in ${{ steps.changed.outputs.services }}; do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
