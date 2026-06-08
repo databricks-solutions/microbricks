@@ -1,7 +1,7 @@
 resources:
   apps:
     hc_portal_app:
-      name: hc-portal-${bundle.target}${var.app_name_suffix}
+      name: hc-portal${var.app_name_suffix}
       description: "Healthcare clinician portal — frontend + BFF."
       source_code_path: ../frontend/hc-portal
 

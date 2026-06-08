@@ -25,7 +25,9 @@ SERVICE="$1"
 ENV="$2"
 PROFILE="${3:-hc-$ENV}"
 
-PROJECT_ID="$SERVICE-$ENV"
+# Project ID matches lakebase-project-up.sh — bare service name, no `<env>`
+# suffix. The `<env>` arg is kept for the default-profile derivation only.
+PROJECT_ID="$SERVICE"
 PROJECT_PATH="projects/$PROJECT_ID"
 
 if ! databricks postgres get-project "$PROJECT_PATH" -p "$PROFILE" >/dev/null 2>&1; then

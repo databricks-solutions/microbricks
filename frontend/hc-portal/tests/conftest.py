@@ -14,9 +14,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def _stub_svc_env(monkeypatch):
     """Stub the BFF's runtime env so `clients/_base.py:_resolve_base_url`
-    can compose `https://<svc>-<target>-<workspace_suffix>` without a real
-    Apps deploy. `respx` intercepts at the httpx transport layer, so the
-    actual host is irrelevant — the URL just has to parse.
+    can compose `https://<svc>-<workspace_suffix>` without a real Apps
+    deploy. `respx` intercepts at the httpx transport layer, so the actual
+    host is irrelevant — the URL just has to parse.
 
     `_own_app_suffix()` is `lru_cache`d: clear the cache so each test
     starts from this stub rather than a previous test's value."""
@@ -25,7 +25,7 @@ def _stub_svc_env(monkeypatch):
     _base_mod._own_app_suffix.cache_clear()
     monkeypatch.setenv(
         "DATABRICKS_APP_URL",
-        "https://hc-portal-test-1234567890.test.databricksapps.com",
+        "https://hc-portal-1234567890.test.databricksapps.com",
     )
     monkeypatch.setenv("DATABRICKS_WORKSPACE_ID", "1234567890")
     yield

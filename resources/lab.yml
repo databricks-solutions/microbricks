@@ -3,7 +3,7 @@
 resources:
   apps:
     lab_app:
-      name: lab-${bundle.target}${var.app_name_suffix}
+      name: lab${var.app_name_suffix}
       description: "System of record for lab orders, results, and reference ranges."
       source_code_path: ../services/lab
 
@@ -16,6 +16,6 @@ resources:
           description: "Lab service Lakebase Autoscale project."
           postgres:
             # See databricks.yml for `lakebase_branch` semantics.
-            branch: projects/lab-${bundle.target}/branches/${var.lakebase_branch}
-            database: projects/lab-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            branch: projects/lab/branches/${var.lakebase_branch}
+            database: projects/lab/branches/${var.lakebase_branch}/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE
