@@ -14,6 +14,7 @@ name: deploy-dev
 on:
   push:
     branches: [develop]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +26,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DATABRICKS_CLI_VERSION: "0.295.0"
+  DATABRICKS_CLI_VERSION: "1.2.1"
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
+  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        
 
 jobs:
   test:
