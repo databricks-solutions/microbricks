@@ -10,7 +10,9 @@ a CI workflow against the dev/test/prod project. In both cases:
 
 Locally, the developer's CLI auth (set LOCAL_DEV_TOKEN_FROM_CLI=true and
 LOCAL_DEV_TOKEN to a `databricks auth token` value) provides the user identity.
-In CI, the workflow injects the SP/OIDC token the same way.
+In CI we use M2M (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) — `databricks
+auth token` only supports U2M, so we don't pre-mint a token there and instead
+let the SDK's default credential chain pick the SP creds up off the env.
 """
 from __future__ import annotations
 
@@ -41,22 +43,22 @@ def _build_url() -> str:
         # Use a stub password so URL parsing succeeds.
         password = "<offline>"
     else:
-        token = os.environ.get("LOCAL_DEV_TOKEN") or os.environ.get("DATABRICKS_TOKEN")
-        if not token:
-            raise RuntimeError(
-                "No user token available for migrations. Set LOCAL_DEV_TOKEN "
-                "(from `databricks auth token -p hc-dev | jq -r .access_token`) "
-                "or DATABRICKS_TOKEN before running alembic."
-            )
-        ws_host = os.environ.get("DATABRICKS_HOST")
-        if not ws_host:
-            raise RuntimeError(
-                "DATABRICKS_HOST must be set so the SDK can mint a Lakebase credential."
-            )
         endpoint = os.environ["ENDPOINT_NAME"]
-        cred = WorkspaceClient(host=ws_host, token=token, auth_type="pat").postgres.generate_database_credential(
-            endpoint=endpoint
-        )
+        token = os.environ.get("LOCAL_DEV_TOKEN") or os.environ.get("DATABRICKS_TOKEN")
+        if token:
+            ws_host = os.environ.get("DATABRICKS_HOST")
+            if not ws_host:
+                raise RuntimeError(
+                    "DATABRICKS_HOST must be set when supplying LOCAL_DEV_TOKEN."
+                )
+            ws = WorkspaceClient(host=ws_host, token=token, auth_type="pat")
+        else:
+            # Fall back to the SDK's default credential chain. In CI this picks
+            # up M2M (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) from the
+            # workflow env; on a workstation it picks up the configured profile
+            # in `~/.databrickscfg`.
+            ws = WorkspaceClient()
+        cred = ws.postgres.generate_database_credential(endpoint=endpoint)
         password = cred.token
 
     return (

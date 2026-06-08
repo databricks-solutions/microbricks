@@ -113,15 +113,19 @@ jobs:
         # Same alembic-driven flow as pr-validate; the only difference is the
         # endpoint (`production` vs `feat-<slug>`) and the matrix scope (we
         # always run all six on trunk-dev because there's no per-PR scoping).
+        # No LOCAL_DEV_TOKEN export here: `databricks auth token` only works
+        # for U2M, and we authenticate as an SP via M2M in CI. The alembic
+        # env.py falls back to the SDK's default credential chain, which picks
+        # up DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET
+        # off the workflow env automatically.
         run: |
           set -euo pipefail
-          export LOCAL_DEV_TOKEN=$(databricks auth token -p hc-dev | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
-          export PGUSER=$(databricks current-user me -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+          export PGUSER=$(databricks current-user me -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
           for svc in patient provider appointment lab prescription billing; do
             echo "→ Migrating $svc against production"
             cd "services/$svc"
             ENDPOINT="projects/$svc-dev/branches/production/endpoints/primary"
-            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
             export PGDATABASE=databricks_postgres
