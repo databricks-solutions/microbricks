@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/brand/microbricks-logo.jpg" alt="microbricks — powered by Databricks" width="540">
+</p>
+
 # Architecture
 
 This document explains *what* this reference architecture is, *why* each piece is shaped the way it is, and *where* to find the patterns it codifies. For the data model, see [`HEALTHCARE_DATA_MODEL.md`](HEALTHCARE_DATA_MODEL.md). For the GitFlow + CI/CD rules, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -63,7 +67,7 @@ What this is **not**: a HIPAA-certified production system, a FHIR implementation
 A service in this architecture is a **single Databricks App** that:
 
 - Lives in `services/<name>/` as a self-contained APX project (FastAPI + optional React admin UI).
-- Owns *exactly one* Lakebase project (one DB per env: `<svc>-dev`, `<svc>-test`, `<svc>-prod`).
+- Owns *exactly one* Lakebase project per env (named `<svc>` in each workspace; env is implicit in the workspace).
 - Exposes a versioned REST API (`/api/v1/...`) consumed only by the BFF — never by the browser directly.
 - References data owned by other services **only by ID** (UUID columns, no FKs across DB boundaries).
 
@@ -129,13 +133,15 @@ Three Databricks workspaces, three DAB targets, three CLI profiles:
 
 | Env | Workspace profile | DAB target | Triggered by | Lakebase project naming |
 |---|---|---|---|---|
-| dev | `hc-dev` | `dev` | push to `develop`, plus per-feature-branch previews | `<svc>-dev`, with `production` branch + `feat-<slug>` branches |
-| test | `hc-test` | `test` | push to `release/*`, merge to `main` | `<svc>-test`, single `production` branch |
-| prod | `hc-prod` | `prod` | tag `v*` + manual approval | `<svc>-prod`, `production` branch + read-only replica endpoint |
+| dev | `hc-dev` | `dev` | push to `develop`, plus per-feature-branch previews | `<svc>`, with `production` branch + `feat-<slug>` branches |
+| test | `hc-test` | `test` | push to `release/*`, merge to `main` | `<svc>`, single `production` branch |
+| prod | `hc-prod` | `prod` | tag `v*` + manual approval | `<svc>`, `production` branch + (planned) read-only replica endpoint |
+
+Each workspace IS its own environment, so project/app names are unsuffixed; the env is implicit in the workspace they live in.
 
 ![Environment promotion](docs/diagrams/environment-promotion.png)
 
-Apps are named `<svc>-${bundle.target}` so `databricks bundle deploy -t prod` produces `patient-prod`, `lab-prod`, etc. Per-feature-branch previews override the name to `<svc>-dev-feat-<slug>`.
+Each workspace is its own environment, so app names are unsuffixed in trunk deploys — `databricks bundle deploy -t dev` produces `patient`, `lab`, `hc-portal`, etc., and `-t prod` produces the same names in the prod workspace. Per-feature-branch previews override `app_name_suffix=-feat-<slug>` so they live alongside the trunk deploy (e.g. `patient-feat-hc-123`).
 
 ---
 
@@ -143,53 +149,58 @@ Apps are named `<svc>-${bundle.target}` so `databricks bundle deploy -t prod` pr
 
 ![CI/CD pipeline](docs/diagrams/cicd-pipeline.png)
 
-Four GitHub Actions workflows, all using OIDC to authenticate to Databricks (no long-lived PATs):
+Six GitHub Actions workflows under `.github/workflows/` (`pr-validate`, `pr-cleanup`, `deploy-{dev,test,prod}`, `nightly-orphan-cleanup`), all pinned to Databricks CLI `1.2.1` and authenticated via M2M service-principal client-credentials (no long-lived PATs — OIDC trust is the documented migration path):
 
 ### Feature branches: code + DB in lockstep
 
 Every code branch has a matching Lakebase branch. Created at feature start (locally), kept alive across all pushes, deleted at PR close/merge.
 
 ```
-feature/HC-123-add-allergies   ←→   projects/<svc>-dev/branches/feat-hc-123-add-allergies
+feature/HC-123-add-allergies   ←→   projects/<svc>/branches/feat-hc-123-add-allergies
 ```
 
-**At feature start (`make db-branch` or pre-push hook):**
+**At feature start** — use `scripts/lakebase-branch-up.sh` (the canonical idempotent verb that the workflows also call):
 
 ```bash
-SLUG=$(echo "$(git branch --show-current)" \
-  | tr '[:upper:]' '[:lower:]' \
-  | sed -E 's|[/_]+|-|g; s|[^a-z0-9-]||g; s|^-+||; s|-+$||' \
-  | cut -c1-50)
-
-databricks postgres create-branch projects/<svc>-dev "feat-$SLUG" \
-  --json '{"spec":{"source_branch":"projects/<svc>-dev/branches/production"}}'
-
-databricks postgres create-endpoint "projects/<svc>-dev/branches/feat-$SLUG" read-write \
-  --json '{"spec":{"endpoint_type":"ENDPOINT_TYPE_READ_WRITE",
-                   "autoscaling_limit_min_cu":0.5,
-                   "autoscaling_limit_max_cu":2.0}}'
+SLUG=$(./scripts/sanitize-branch-slug.sh "$(git branch --show-current)")
+./scripts/lakebase-branch-up.sh patient dev "feat-$SLUG"
 ```
 
-The dev's local `.env` points `ENDPOINT_NAME` at the new endpoint; `apx dev start` runs against it.
+Under the hood it calls `databricks postgres create-branch` (`source_branch=projects/<svc>/branches/production`) and then `create-endpoint` with `autoscaling_limit_{min,max}_cu = 0.5 / 2.0`. The dev's local `.env` points `ENDPOINT_NAME` at the new endpoint; `apx dev start` runs against it.
 
 ### `pr-validate.yml` (the interesting one)
 
-On any PR against `develop`, for each changed `services/*`:
+On any PR against `develop` / `release/*` / `main`, for each changed `services/*`:
 
-1. Lint + unit tests (`apx dev check`, `pytest`).
-2. **Look up or create** the matching Lakebase feature branch (idempotent — covers contributors who skipped the local step).
-3. Deploy a preview app `<svc>-dev-feat-<slug>` wired to that endpoint via `app.yaml` env override.
-4. Run integration tests + contract tests against the preview.
-5. Run a Playwright smoke against the preview portal (only for changes that touch `frontend/` or BFF-relevant routes).
-6. **On PR close/merge:** tear down preview app, endpoint, and branch.
+1. Lint + unit tests (matrix over services; portal tests in their own job).
+2. **Look up or create** the matching Lakebase feature branch (idempotent — covers contributors who skipped the local step). All six are provisioned, not just the changed ones, so every app's `postgres` resource reference still resolves; alembic only runs against the services the PR actually touched.
+3. Build every apx frontend (`scripts/build-frontends.sh` → `apx frontend build` per project) so the React UIs ship inside the bundle.
+4. `databricks bundle deploy -t dev --var "app_name_suffix=-<slug>" --var "lakebase_branch=feat-<slug>"` — wires the preview apps' names, source dirs, and Lakebase bindings in one call.
+5. `databricks bundle run` per app, fired in parallel — submits a new app deployment from the synced source and waits until each reaches `RUNNING`.
+6. Strict `/healthz` smoke (status `200` AND body exactly `{"ok":true}` — Apps' OBO gateway returns 200-with-HTML for unauthenticated requests, which would fool a vanilla `curl -fsS`).
+7. Resolve each preview app's canonical URL via `databricks apps get <name> -o json` (the platform embeds the workspace ID into the hostname, so it can't be constructed client-side) and post the table to the PR.
+8. **On PR close/merge:** `pr-cleanup.yml` runs `bundle destroy` + tears down all six Lakebase feature branches.
 
-Subsequent pushes to the same feature branch reuse the same DB branch and preview app — schema migrations and seed data persist across pushes, which means the dev's local state and CI's state are the same state.
+Subsequent pushes to the same feature branch reuse the same DB branch and preview apps — schema migrations and seed data persist across pushes, so the dev's local state and CI's state are the same state.
 
 A safety net: branches are created **without** `no_expiry`, so the platform's default TTL (24h of inactivity → delete) cleans them up if the workflow fails to. Endpoints scale to zero when idle, so an inactive feature branch costs ~$0.
 
 ### `deploy-dev.yml`, `deploy-test.yml`, `deploy-prod.yml`
 
-Each runs `databricks bundle deploy -t <target>` against its profile. `deploy-prod.yml` adds a `environment: prod` GitHub gate for manual approval and runs only on tag pushes (`v*`).
+Each follows the same shape as `pr-validate.yml` minus the per-PR scoping:
+
+1. Path-unscoped lint + unit tests across all six services + the BFF.
+2. Write the env's `~/.databrickscfg` profile from `vars.DATABRICKS_HOST_<ENV>` + `secrets.DATABRICKS_CLIENT_{ID,SECRET}`.
+3. Ensure the six Lakebase projects exist (idempotent via `scripts/lakebase-project-up.sh`).
+4. Run `alembic upgrade head` against each service's `production` Lakebase branch BEFORE the deploy — running migrations after the app deploys means a brief window of broken prod.
+5. Build every apx frontend.
+6. `databricks bundle deploy -t <env>` followed by parallel `databricks bundle run` per app, then `apps get` polling until each reaches `RUNNING`.
+7. Strict `/healthz` smoke against every app, using a short-lived bearer minted via the OAuth `client_credentials` flow (`${DATABRICKS_HOST}/oidc/v1/token`).
+8. Final step resolves `hc-portal`'s canonical URL from `apps get` and feeds it into the GitHub `environment.url` so the Environments tab points at the real workspace-qualified Apps URL.
+
+`deploy-prod.yml` adds an `environment: prod` GitHub gate for manual approval and runs only on tag pushes (`v*`).
+
+The local equivalent of every step lives in `scripts/ci-local.sh` (lint/test/deploy from a developer's workstation, against `~/.databrickscfg` profiles instead of GitHub-injected env secrets) and `scripts/deploy-and-run-bundle.sh` (the `bundle deploy` + per-app `bundle run` combo as a standalone verb with `--only` / `--skip-deploy` / `--restart` / `--no-wait` / `--var` passthrough).
 
 The full ruleset lives in [`./.claude/skills/hc-gitflow-cicd/SKILL.md`](.claude/skills/hc-gitflow-cicd/SKILL.md).
 
@@ -205,7 +216,7 @@ The full ruleset lives in [`./.claude/skills/hc-gitflow-cicd/SKILL.md`](.claude/
 
 **Unity Catalog** — the only governance layer. Postgres roles + UC RLS handle row-level access; service code never enforces auth itself.
 
-**GitHub Actions** — for CI/CD, with OIDC to Databricks. Standard, free for public repos, integrates with `gh` for PR comments.
+**GitHub Actions** — for CI/CD, authenticated to Databricks via M2M service-principal `client_credentials` (one SP per env, scoped to the matching GitHub environment's secrets). Standard, free for public repos, integrates with `gh` for PR comments. OIDC trust is the documented migration path once it's available on each workspace.
 
 ---
 

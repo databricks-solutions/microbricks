@@ -8,6 +8,14 @@ env:
   - name: SERVICE_NAME
     value: "hc-portal"
 
+  # The `hc_portal` package lives under `src/hc_portal/` (hatchling src-layout).
+  # `[tool.uv] package = false` in pyproject.toml means `uv sync` installs deps
+  # but NOT the local source as a wheel, so adding `src` to PYTHONPATH is what
+  # lets uvicorn import `hc_portal.backend.app:app` at runtime. Same pattern as
+  # services/<svc>/app.yaml — keep these in sync.
+  - name: PYTHONPATH
+    value: "src"
+
 # Per-service URLs are resolved at runtime by `clients/_base.py`:
 #   1. Explicit override `<SVC>_SVC_URL` (e.g. `PATIENT_SVC_URL`) if set.
 #   2. Otherwise, derived from `DATABRICKS_APP_URL` + the canonical

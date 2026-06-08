@@ -51,6 +51,7 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 SLUG_SH="$SCRIPT_DIR/sanitize-branch-slug.sh"
 BRANCH_UP="$SCRIPT_DIR/lakebase-branch-up.sh"
 BRANCH_DOWN="$SCRIPT_DIR/lakebase-branch-down.sh"
+BUILD_FRONTENDS="$SCRIPT_DIR/build-frontends.sh"
 
 # Hardcoded service list — same six everywhere in the workflows. If a
 # seventh service is added, update both this and the matching workflows.
@@ -152,6 +153,23 @@ portal_checks() {
     uv run pytest -m 'not integration' -q
   )
   ok "portal-checks passed"
+}
+
+# ---------------------------------------------------------------------------
+# Build every apx project's React UI under `frontend/`. Mirrors the
+# "Build all frontend UIs" step in `.github/workflows/*.yml`. Must run
+# before `databricks bundle deploy` because:
+#   - the deploy syncs source files only, no build step;
+#   - the FastAPI factory only mounts the SPA when `src/<pkg>/__dist__/`
+#     exists at runtime;
+#   - that directory is gitignored, so a fresh checkout has no UI built.
+# `databricks.yml`'s `sync.include` then force-includes the dist folders
+# in the deploy.
+# ---------------------------------------------------------------------------
+build_frontends() {
+  step "build all frontend UIs"
+  "$BUILD_FRONTENDS"
+  ok "frontend UIs built"
 }
 
 # ---------------------------------------------------------------------------
@@ -421,6 +439,8 @@ cmd_pr_validate() {
     run_migrations "$svc" dev "$slug" hc-dev
   done
 
+  build_frontends
+
   step "bundle deploy preview (-t dev)"
   (
     cd "$REPO_ROOT"
@@ -511,6 +531,8 @@ cmd_deploy() {
   for svc in "${SERVICES[@]}"; do
     run_migrations "$svc" "$target" production "$profile"
   done
+
+  build_frontends
 
   step "bundle deploy -t $target"
   (
