@@ -73,7 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: dev
-      url: https://hc-portal.databricksapps.com
+      # Resolved at step-completion time from `databricks apps get`. The
+      # short-form hostname is NOT the canonical URL — the real one embeds
+      # the workspace ID. See the `portal-url` step below.
+      url: ${{ steps.portal-url.outputs.url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -136,6 +139,26 @@ jobs:
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
           done
+
+      # `bundle deploy` syncs source files but does not build anything. Each
+      # apx project's React UI builds to `src/<pkg>/__dist__/` (gitignored),
+      # and the FastAPI factory only mounts the SPA when that directory is
+      # present at runtime. Without this build step, the deployed app would
+      # serve the BFF/API only and 404 on every page route. See
+      # `scripts/build-frontends.sh` and the `sync.include` block in
+      # `databricks.yml` for the matching pieces. apx delegates the install
+      # + vite invocation to bun, so bun is a hard prereq.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
 
       - name: bundle deploy
         run: databricks bundle deploy -t dev
@@ -220,9 +243,20 @@ jobs:
         #   3. Assert HTTP status is EXACTLY 200 (not <400).
         #   4. Assert the body is EXACTLY {"ok":true} (catches OAuth HTML
         #      pages that come back with status 200).
+        #
+        # Why curl + /oidc/v1/token, not `databricks auth token`:
+        #   `databricks auth token` only supports U2M (refresh-token) auth.
+        #   We're authenticating as a service principal via M2M, so we hit
+        #   the workspace's OAuth token endpoint with the client_credentials
+        #   grant and `all-apis` scope — the same path the Databricks SDK
+        #   uses internally for M2M.
         run: |
           set -euo pipefail
-          TOKEN=$(databricks auth token -p hc-dev -o json \
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           assert_healthz() {
             local app="$1" path="$2"
@@ -256,3 +290,15 @@ jobs:
           done
           assert_healthz hc-portal "/api/bff/healthz" || FAIL=1
           (( FAIL == 0 )) || exit 1
+
+      - name: Resolve hc-portal URL for environment link
+        id: portal-url
+        # Feeds `environment.url` so the GitHub Environments tab points at
+        # the real workspace-qualified Apps URL (which embeds the workspace
+        # ID) rather than a guessable short form.
+        run: |
+          set -euo pipefail
+          URL=$(databricks apps get hc-portal -p hc-dev -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Resolved hc-portal URL: $URL"

@@ -58,7 +58,10 @@ jobs:
     # Settings -> Environments -> prod.
     environment:
       name: prod
-      url: https://hc-portal.databricksapps.com
+      # Resolved at step-completion time from `databricks apps get`. The
+      # short-form hostname is NOT the canonical URL — the real one embeds
+      # the workspace ID. See the `portal-url` step below.
+      url: ${{ steps.portal-url.outputs.url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -119,6 +122,22 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
 
+      # See deploy-dev.yml for the full rationale. Same shape — bun + apx
+      # + build-frontends.sh, which iterates over every apx project under
+      # `frontend/`. Without this, `bundle deploy` ships a UI-less app
+      # because each project's `src/<pkg>/__dist__/` is gitignored.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
+
       - name: bundle deploy
         run: databricks bundle deploy -t prod
 
@@ -172,9 +191,17 @@ jobs:
       - name: Smoke test (honest /healthz check)
         # See deploy-dev.yml for the full rationale. Same SP-token + strict
         # status + body assertion shape.
+        #
+        # M2M token via /oidc/v1/token (not `databricks auth token`, which
+        # is U2M-only). See deploy-dev.yml's smoke-test step for the
+        # detailed rationale.
         run: |
           set -euo pipefail
-          TOKEN=$(databricks auth token -p hc-prod -o json \
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           assert_healthz() {
             local app="$1" path="$2"
@@ -208,3 +235,13 @@ jobs:
           done
           assert_healthz hc-portal "/api/bff/healthz" || FAIL=1
           (( FAIL == 0 )) || exit 1
+
+      - name: Resolve hc-portal URL for environment link
+        id: portal-url
+        # See deploy-dev.yml for the rationale.
+        run: |
+          set -euo pipefail
+          URL=$(databricks apps get hc-portal -p hc-prod -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Resolved hc-portal URL: $URL"

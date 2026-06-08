@@ -176,10 +176,12 @@ jobs:
   # the BFF tests don't need node_modules, and the install routinely hung on
   # GH-hosted runners (~18 min and counting on PR #1) — likely a registry
   # timeout interacting with the OpenTelemetry + Radix UI dep set. The UI
-  # ships pre-built via `apx build` at deploy time; lockfile drift is caught
-  # by the deploy pipeline. If we ever need to gate PRs on UI typecheck/build,
-  # add a separate `ui-checks` job with `actions/cache` keyed on bun.lock and
-  # a hard timeout.
+  # is built later in `preview-deploy` (via `scripts/build-frontends.sh`)
+  # immediately before `bundle deploy`, so a broken UI build still fails
+  # the PR — just at the deploy stage instead of as a parallel typecheck.
+  # If we ever want to gate earlier (parallel with `service-checks` for
+  # faster feedback), add a separate `ui-checks` job with `actions/cache`
+  # keyed on bun.lock and a hard timeout.
 
   # ---------------------------------------------------------------------------
   # Stage 3: bundle validate. Always runs — even if only `services/<svc>/README.md`
@@ -266,8 +268,11 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: dev
-      # Comment shape — populated below.
-      url: https://hc-portal-${{ needs.detect-changes.outputs.slug }}.databricksapps.com
+      # Resolved at step-completion time from `databricks apps get`. The
+      # short-form hostname (`hc-portal-<slug>.databricksapps.com`) is NOT
+      # the canonical URL — the real one embeds the workspace ID — so we
+      # let the apps API tell us. See the `urls` step below.
+      url: ${{ steps.urls.outputs.portal_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -381,6 +386,26 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
 
+      # `bundle deploy` syncs source files but does not build anything. Each
+      # apx project's React UI builds to `src/<pkg>/__dist__/` (gitignored),
+      # and the FastAPI factory only mounts the SPA when that directory is
+      # present at runtime. Without this, the preview app would serve the
+      # BFF/API only and 404 on every page route. See
+      # `scripts/build-frontends.sh` and the `sync.include` block in
+      # `databricks.yml`. apx delegates the install + vite invocation to
+      # bun, so bun is a hard prereq.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
+
       - name: Deploy preview bundle
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
@@ -469,9 +494,22 @@ jobs:
         # deployed app names carry the per-PR slug suffix.
         #
         # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
+        #
+        # Token minting note: we cannot use `databricks auth token` here —
+        # that command only supports U2M tokens, and CI authenticates as an
+        # SP via M2M (client_id + client_secret). Instead, we hit the
+        # workspace's OAuth endpoint with the client_credentials grant and
+        # `all-apis` scope, which is the M2M-equivalent path the SDK takes
+        # internally. The SP already has CAN_MANAGE on every preview app
+        # (created by its own `bundle deploy` above), so the gateway forwards
+        # the bearer through to /healthz.
         run: |
           set -euo pipefail
-          TOKEN=$(databricks auth token -p hc-dev -o json \
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
           assert_healthz() {
             local app="$1" path="$2"
@@ -506,11 +544,43 @@ jobs:
           assert_healthz "hc-portal-$SLUG" "/api/bff/healthz" || FAIL=1
           (( FAIL == 0 )) || exit 1
 
+      - name: Collect preview app URLs
+        id: urls
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+        # The "pretty" hostname (e.g. patient-feat-x.databricksapps.com) is NOT
+        # the real URL — Databricks Apps embeds the workspace ID into the
+        # hostname (e.g. patient-feat-x-7405606704848118.18.azure.databricksapps.com).
+        # We can't construct that on our own, so we ask the apps API for the
+        # canonical `url` field (same source the smoke-test step uses) and
+        # emit a JSON map keyed by the *bare* service name for the comment
+        # step to consume.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, subprocess
+          slug = os.environ["SLUG"]
+          services = ["patient","provider","appointment","lab","prescription","billing","hc-portal"]
+          urls = {}
+          for s in services:
+              app = f"{s}-{slug}"
+              out = subprocess.check_output(
+                  ["databricks","apps","get",app,"-p","hc-dev","-o","json"],
+                  text=True,
+              )
+              urls[s] = json.loads(out).get("url","") or ""
+          print(f"map={json.dumps(urls)}")
+          print(f"portal_url={urls.get('hc-portal','')}")
+          PY
+
       - name: Comment preview URLs on PR
         uses: actions/github-script@v7
+        env:
+          URLS_JSON: ${{ steps.urls.outputs.map }}
         with:
           script: |
             const slug = '${{ needs.detect-changes.outputs.slug }}';  // already prefixed: e.g. "feat-hc-123"
+            const urls = JSON.parse(process.env.URLS_JSON || '{}');
             const services = ['patient','provider','appointment','lab','prescription','billing','hc-portal'];
             const body = [
               '### 🔬 Preview deploy ready',
@@ -520,7 +590,7 @@ jobs:
               '',
               '| App | URL |',
               '|---|---|',
-              ...services.map(s => `| \`${s}-${slug}\` | https://${s}-${slug}.databricksapps.com |`),
+              ...services.map(s => `| \`${s}-${slug}\` | ${urls[s] || `https://${s}-${slug}.databricksapps.com`} |`),
               '',
               'Login with your Databricks user; the BFF forwards your OBO token to each backend.',
               '',
