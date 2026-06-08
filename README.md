@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/brand/microbricks-logo.jpg" alt="microbricks — powered by Databricks" width="800" />
-</p>
+
 
 # microbricks
 
@@ -8,7 +6,7 @@ A reference architecture demonstrating how to build **microservices on Databrick
 
 The demo domain is healthcare: six backend services that loosely follow HL7 FHIR resource boundaries, plus one frontend portal with an in-process BFF.
 
-> **Status:** Phases 1–7 complete — six backend services + the BFF + the DAB bundle + six GitHub Actions workflows are all in place; dev is end-to-end runnable via `scripts/ci-local.sh`. The remaining work (Phase 8) is unblocking GH-hosted runners against the dev workspace's IP allowlist, then a clone-to-demo polish pass. See [`ROADMAP.md`](ROADMAP.md) for the full phase breakdown and [open work](#open-work) for what's next.
+> **Status:** Phases 1–7 complete — six backend services + the BFF + the DAB bundle + six GitHub Actions workflows are all in place; dev is end-to-end runnable via `scripts/ci-local.sh`. The remaining work (Phase 8) is unblocking GH-hosted runners against the dev workspace's IP allowlist, then a clone-to-demo polish pass. See `[ROADMAP.md](ROADMAP.md)` for the full phase breakdown and [open work](#open-work) for what's next.
 
 ---
 
@@ -25,21 +23,21 @@ Browser  →  hc-portal (frontend + BFF)  →  6 backend services  →  6 Lakeba
 - **OBO auth** end-to-end. Every Postgres connection is opened with the calling user's OAuth credential, so Unity Catalog enforces access at the data layer.
 - **No backend-to-backend calls.** The BFF is the only place where data from multiple services is joined.
 
-Detailed architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md). Data model: [`HEALTHCARE_DATA_MODEL.md`](HEALTHCARE_DATA_MODEL.md). Implementation plan: [`ROADMAP.md`](ROADMAP.md).
+Detailed architecture: `[ARCHITECTURE.md](ARCHITECTURE.md)`. Data model: `[HEALTHCARE_DATA_MODEL.md](HEALTHCARE_DATA_MODEL.md)`. Implementation plan: `[ROADMAP.md](ROADMAP.md)`.
 
 ---
 
 ## Prerequisites
 
 
-| Tool              | Min version                    | Install                                                                 |
-| ----------------- | ------------------------------ | ----------------------------------------------------------------------- |
-| Databricks CLI    | `0.295.0`                      | `brew install databricks`                                               |
-| `apx`             | latest                         | `curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh` |
-| `uv`              | latest                         | `curl -LsSf https://astral.sh/uv/install.sh | sh`                       |
-| `bun`             | latest                         | `curl -fsSL https://bun.sh/install | bash`                              |
-| `gh`              | latest                         | `brew install gh`                                                       |
-| `psql` (optional) | 16                             | `brew install postgresql@16`                                            |
+| Tool              | Min version | Install                                                                                                                    |
+| ----------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Databricks CLI    | `0.295.0`   | `brew install databricks`                                                                                                  |
+| `apx`             | latest      | `curl -fsSL [https://databricks-solutions.github.io/apx/install.sh](https://databricks-solutions.github.io/apx/install.sh) |
+| `uv`              | latest      | `curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh)                                             |
+| `bun`             | latest      | `curl -fsSL [https://bun.sh/install](https://bun.sh/install)                                                               |
+| `gh`              | latest      | `brew install gh`                                                                                                          |
+| `psql` (optional) | 16          | `brew install postgresql@16`                                                                                               |
 
 
 Three Databricks workspaces (FE-VM serverless type, required for Lakebase + Apps):
@@ -170,14 +168,16 @@ The repo ships six project-local skills under `.claude/skills/`. Each one codifi
 
 The repo ships six workflows under `.github/workflows/`:
 
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `pr-validate.yml` | PR open/sync against `develop`/`release/*`/`main` | Path-scoped matrix: lint + unit tests for changed services, BFF tests, bundle-validate, provision per-feature Lakebase branches, alembic, deploy preview apps, smoke, comment URLs on the PR |
-| `pr-cleanup.yml` | PR close (merged or not) | `bundle destroy` of the preview + tear down 6 Lakebase feature branches |
-| `deploy-dev.yml` | Push to `develop` | `bundle deploy -t dev`, alembic against `production` branches, smoke 7 apps |
-| `deploy-test.yml` | Push to `release/*` or `main` | Same shape, `-t test` |
-| `deploy-prod.yml` | Push tag `v*` on `main` | Same shape, `-t prod`, gated by manual approval on the `prod` GitHub environment |
-| `nightly-orphan-cleanup.yml` | Daily cron (04:17 UTC) + manual | GC Lakebase feature branches whose PR is closed |
+
+| Workflow                     | Trigger                                           | What it does                                                                                                                                                                                 |
+| ---------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr-validate.yml`            | PR open/sync against `develop`/`release/*`/`main` | Path-scoped matrix: lint + unit tests for changed services, BFF tests, bundle-validate, provision per-feature Lakebase branches, alembic, deploy preview apps, smoke, comment URLs on the PR |
+| `pr-cleanup.yml`             | PR close (merged or not)                          | `bundle destroy` of the preview + tear down 6 Lakebase feature branches                                                                                                                      |
+| `deploy-dev.yml`             | Push to `develop`                                 | `bundle deploy -t dev`, alembic against `production` branches, smoke 7 apps                                                                                                                  |
+| `deploy-test.yml`            | Push to `release/*` or `main`                     | Same shape, `-t test`                                                                                                                                                                        |
+| `deploy-prod.yml`            | Push tag `v*` on `main`                           | Same shape, `-t prod`, gated by manual approval on the `prod` GitHub environment                                                                                                             |
+| `nightly-orphan-cleanup.yml` | Daily cron (04:17 UTC) + manual                   | GC Lakebase feature branches whose PR is closed                                                                                                                                              |
+
 
 Auth is service-principal client-secret M2M, scoped to a per-environment GitHub secret (`secrets.DATABRICKS_CLIENT_{ID,SECRET}` resolves differently in `dev` / `test` / `prod` environments). OIDC migration path is documented inline in `pr-validate.yml`.
 
@@ -187,7 +187,7 @@ Auth is service-principal client-secret M2M, scoped to a per-environment GitHub 
 
 ## Open work
 
-The phased plan in [`ROADMAP.md`](ROADMAP.md) is mostly done — phases 1-7 (six services + BFF + seed data + DAB bundle + dev rollout + workflows) are ✅. Phase 8 wraps it up:
+The phased plan in `[ROADMAP.md](ROADMAP.md)` is mostly done — phases 1-7 (six services + BFF + seed data + DAB bundle + dev rollout + workflows) are ✅. Phase 8 wraps it up:
 
 - **Unblock CI ↔ Databricks** — pick one of the three options in the `github-runner-ip-acl` finding so the workflows actually fire against the workspace.
 - **Fresh-clone test** — verify a stranger can go from `git clone` to a working PR with a preview app in under 30 minutes following only README + CONTRIBUTING.
@@ -200,4 +200,4 @@ Future / optional follow-ups (Phases 9–14 in `ROADMAP.md`): service-mesh obser
 
 ## License
 
-MIT. This is a reference architecture — **HIPAA compliance is your responsibility**, the data model is illustrative and the synthetic data is intentionally non-realistic.
+MIT. This is a reference architecture — **HIPAA compliance is your responsibility**, the data model is illustrative and the synthetic data is intentionally non-realistic. 

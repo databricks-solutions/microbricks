@@ -18,4 +18,4 @@ resources:
             # See databricks.yml for `lakebase_branch` semantics.
             branch: projects/appointment-${bundle.target}/branches/${var.lakebase_branch}
             database: projects/appointment-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
-            permission: CAN_CONNECT_AND_CREATE
+            permission: CAN_CONNECT
