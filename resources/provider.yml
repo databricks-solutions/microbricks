@@ -3,7 +3,7 @@
 resources:
   apps:
     provider_app:
-      name: provider-${bundle.target}${var.app_name_suffix}
+      name: provider${var.app_name_suffix}
       description: "System of record for clinicians, organizations, and specialties."
       source_code_path: ../services/provider
 
@@ -16,6 +16,6 @@ resources:
           description: "Provider service Lakebase Autoscale project."
           postgres:
             # See databricks.yml for `lakebase_branch` semantics.
-            branch: projects/provider-${bundle.target}/branches/${var.lakebase_branch}
-            database: projects/provider-${bundle.target}/branches/${var.lakebase_branch}/databases/databricks-postgres
+            branch: projects/provider/branches/${var.lakebase_branch}
+            database: projects/provider/branches/${var.lakebase_branch}/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE

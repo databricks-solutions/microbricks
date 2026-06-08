@@ -176,11 +176,13 @@ bundle_validate_preview() {
 # is meant to be called per-service inside one shell session.
 # ---------------------------------------------------------------------------
 run_migrations() {
+  # `project_target` is unused in the path now (project IDs dropped the
+  # `-<env>` suffix); kept in the signature so callers don't have to change.
   local svc="$1" project_target="$2" branch="$3" profile="$4"
   step "alembic upgrade head: $svc against $branch (profile=$profile)"
 
   local endpoint host user
-  endpoint="projects/$svc-$project_target/branches/$branch/endpoints/primary"
+  endpoint="projects/$svc/branches/$branch/endpoints/primary"
   host=$(databricks postgres get-endpoint "$endpoint" -p "$profile" -o json \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
   user=$(databricks current-user me -p "$profile" -o json \
@@ -205,14 +207,68 @@ run_migrations() {
 }
 
 # ---------------------------------------------------------------------------
+# `bundle run` every app (services first, BFF last) so the platform actually
+# submits a new app deployment. `bundle deploy` alone only syncs source and
+# resource specs — without `bundle run`, the platform keeps serving the
+# previous code (or stays UNAVAILABLE on first deploy). See the docs:
+#   https://docs.databricks.com/aws/en/dev-tools/databricks-apps/cicd-github-actions
+# Extra args (e.g. `--var app_name_suffix=-feat-foo`) are passed through so
+# the PR-preview shape resolves against the same root_path as the deploy.
+# ---------------------------------------------------------------------------
+bundle_run_apps() {
+  local target="$1" profile="$2"
+  shift 2
+  local extra_args=("$@")
+  step "bundle run (each app, -t $target)"
+  for key in patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app; do
+    (
+      cd "$REPO_ROOT"
+      databricks bundle run -t "$target" -p "$profile" "${extra_args[@]}" "$key"
+    )
+    ok "$key kicked"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Poll `apps get` until every app reaches RUNNING. `bundle run` returns once
+# the deployment is signaled but the app may still be initializing — this is
+# the explicit gate per Databricks' "Wait for app to be healthy" guidance.
+# ---------------------------------------------------------------------------
+wait_for_running() {
+  local profile="$1" suffix="$2"
+  step "wait for RUNNING (suffix='$suffix', profile=$profile)"
+  for app in patient provider appointment lab prescription billing hc-portal; do
+    local name="$app$suffix"
+    local i state
+    for i in $(seq 1 20); do
+      state=$(databricks apps get "$name" -p "$profile" -o json 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))' 2>/dev/null || echo "")
+      printf '  %s attempt %s/20: state=%s\n' "$name" "$i" "$state"
+      if [[ "$state" == "RUNNING" ]]; then
+        break
+      fi
+      if (( i == 20 )); then
+        err "$name did not reach RUNNING within 5 minutes"
+        return 1
+      fi
+      sleep 15
+    done
+  done
+  ok "all 7 apps RUNNING"
+}
+
+# ---------------------------------------------------------------------------
 # Smoke each deployed app. Mirrors the smoke step at the end of every
 # deploy job. Just hits /healthz; expects 200.
 # ---------------------------------------------------------------------------
 smoke_apps() {
+  # `target` only labels the log line — app names dropped the `-<target>`
+  # suffix; the deployed name is just `<svc>` (or `<svc><suffix>` for PR
+  # previews where suffix is `-feat-<slug>`).
   local target="$1" suffix="$2" profile="$3"
   step "smoke test ($target$suffix)"
   for app in patient provider appointment lab prescription billing hc-portal; do
-    local name="$app-$target$suffix" url
+    local name="$app$suffix" url
     url=$(databricks apps get "$name" -p "$profile" -o json 2>/dev/null \
       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("url",""))' 2>/dev/null || echo "")
     if [[ -z "$url" ]]; then
@@ -308,9 +364,15 @@ cmd_pr_validate() {
   )
   ok "preview deployed"
 
+  bundle_run_apps dev hc-dev \
+    --var "app_name_suffix=-$slug" \
+    --var "lakebase_branch=$slug"
+
+  wait_for_running hc-dev "-$slug"
+
   smoke_apps dev "-$slug" hc-dev
 
-  log "pr-validate complete — preview at https://hc-portal-dev-$slug.<workspace>.databricksapps.com"
+  log "pr-validate complete — preview at https://hc-portal-$slug.<workspace>.databricksapps.com"
 }
 
 # ===========================================================================
@@ -391,6 +453,10 @@ cmd_deploy() {
   )
   ok "bundle deployed"
 
+  bundle_run_apps "$target" "$profile"
+
+  wait_for_running "$profile" ""
+
   smoke_apps "$target" "" "$profile"
 
   log "deploy -t $target complete"
@@ -421,9 +487,9 @@ cmd_nightly_cleanup() {
   ok "allowlist size $(wc -l <"$allow")"
 
   for svc in "${SERVICES[@]}"; do
-    step "scanning projects/$svc-dev"
+    step "scanning projects/$svc"
     local branches
-    branches=$(databricks postgres list-branches "projects/$svc-dev" -p hc-dev -o json 2>/dev/null \
+    branches=$(databricks postgres list-branches "projects/$svc" -p hc-dev -o json 2>/dev/null \
       | python3 -c 'import json,sys; [print(b["name"]) for b in json.load(sys.stdin)]' \
       | grep -E '^(feat|hotfix)-' || true)
     while IFS= read -r branch; do

@@ -267,7 +267,7 @@ jobs:
     environment:
       name: dev
       # Comment shape — populated below.
-      url: https://hc-portal-dev-${{ needs.detect-changes.outputs.slug }}.databricksapps.com
+      url: https://hc-portal-${{ needs.detect-changes.outputs.slug }}.databricksapps.com
     steps:
       - uses: actions/checkout@v4
 
@@ -368,7 +368,7 @@ jobs:
           for svc in ${{ steps.changed.outputs.services }}; do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
-            ENDPOINT="projects/$svc-dev/branches/$SLUG/endpoints/primary"
+            ENDPOINT="projects/$svc/branches/$SLUG/endpoints/primary"
             HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
@@ -399,6 +399,46 @@ jobs:
             --var "app_name_suffix=-$SLUG" \
             --var "lakebase_branch=$SLUG"
 
+      - name: bundle run preview apps (submit deployment per app)
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+        # `bundle deploy` alone does NOT submit a new app deployment — the
+        # preview apps stay UNAVAILABLE until `bundle run` kicks them. See
+        # https://docs.databricks.com/aws/en/dev-tools/databricks-apps/cicd-github-actions
+        # The `--var` overrides must match the deploy step so `bundle run`
+        # resolves each app key against the same per-PR root_path. Order:
+        # services first, hc-portal last, so the BFF's `CAN_USE` targets
+        # are live before it attaches.
+        run: |
+          set -euo pipefail
+          for key in patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app; do
+            echo "→ databricks bundle run -t dev $key (slug=$SLUG)"
+            databricks bundle run -t dev "$key" \
+              --var "app_name_suffix=-$SLUG" \
+              --var "lakebase_branch=$SLUG"
+          done
+
+      - name: Wait for RUNNING state
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+        run: |
+          set -euo pipefail
+          for app in patient provider appointment lab prescription billing hc-portal; do
+            for i in $(seq 1 20); do
+              STATE=$(databricks apps get "$app-$SLUG" -p hc-dev -o json \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
+              echo "  $app-$SLUG attempt $i/20: state=$STATE"
+              if [[ "$STATE" == "RUNNING" ]]; then
+                break
+              fi
+              if (( i == 20 )); then
+                echo "::error::$app-$SLUG did not reach RUNNING within 5 minutes"
+                exit 1
+              fi
+              sleep 15
+            done
+          done
+
       - name: Smoke-test preview
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
@@ -409,9 +449,9 @@ jobs:
           # path that's unguarded by design). /api/v1/* should 401.
           # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
           for app in patient provider appointment lab prescription billing hc-portal; do
-            URL=$(databricks apps get "$app-dev-$SLUG" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            URL=$(databricks apps get "$app-$SLUG" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
             if [[ -z "$URL" ]]; then
-              echo "::error::App $app-dev-$SLUG has no URL — deploy may have failed"
+              echo "::error::App $app-$SLUG has no URL — deploy may have failed"
               exit 1
             fi
             echo "Smoke: $app -> $URL"
@@ -432,7 +472,7 @@ jobs:
               '',
               '| App | URL |',
               '|---|---|',
-              ...services.map(s => `| \`${s}-dev-${slug}\` | https://${s}-dev-${slug}.databricksapps.com |`),
+              ...services.map(s => `| \`${s}-${slug}\` | https://${s}-${slug}.databricksapps.com |`),
               '',
               'Login with your Databricks user; the BFF forwards your OBO token to each backend.',
               '',

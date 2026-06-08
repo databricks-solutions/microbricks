@@ -106,23 +106,23 @@ def test_summary_happy_path_forwards_token_to_every_service():
 
         return hook
 
-    respx.get(f"https://patient-test-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
+    respx.get(f"https://patient-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
         side_effect=lambda req: (captured.__setitem__("patient", req)
                                  or httpx.Response(200, json=_patient_payload()))
     )
-    respx.get("https://appointment-test-1234567890.test.databricksapps.com/api/v1/appointments").mock(
+    respx.get("https://appointment-1234567890.test.databricksapps.com/api/v1/appointments").mock(
         side_effect=lambda req: (captured.__setitem__("appointment", req)
                                  or httpx.Response(200, json=[_appointment_payload()]))
     )
-    respx.get("https://lab-test-1234567890.test.databricksapps.com/api/v1/lab-orders").mock(
+    respx.get("https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders").mock(
         side_effect=lambda req: (captured.__setitem__("lab", req)
                                  or httpx.Response(200, json=[_lab_payload()]))
     )
-    respx.get("https://prescription-test-1234567890.test.databricksapps.com/api/v1/prescriptions").mock(
+    respx.get("https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions").mock(
         side_effect=lambda req: (captured.__setitem__("rx", req)
                                  or httpx.Response(200, json=[_rx_payload()]))
     )
-    respx.get("https://billing-test-1234567890.test.databricksapps.com/api/v1/invoices").mock(
+    respx.get("https://billing-1234567890.test.databricksapps.com/api/v1/invoices").mock(
         side_effect=lambda req: (captured.__setitem__("billing", req)
                                  or httpx.Response(200, json=[_invoice_payload()]))
     )
@@ -153,19 +153,19 @@ def test_partial_failure_returns_200_with_partial_flag():
     """A peripheral service failure → 200 with `partial: true` and empty
     list for that section. Patient is required and present, so the response
     is not 502."""
-    respx.get(f"https://patient-test-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
+    respx.get(f"https://patient-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
         return_value=httpx.Response(200, json=_patient_payload())
     )
-    respx.get("https://appointment-test-1234567890.test.databricksapps.com/api/v1/appointments").mock(
+    respx.get("https://appointment-1234567890.test.databricksapps.com/api/v1/appointments").mock(
         return_value=httpx.Response(200, json=[_appointment_payload()])
     )
-    respx.get("https://lab-test-1234567890.test.databricksapps.com/api/v1/lab-orders").mock(
+    respx.get("https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders").mock(
         return_value=httpx.Response(503, text="lab is down")
     )
-    respx.get("https://prescription-test-1234567890.test.databricksapps.com/api/v1/prescriptions").mock(
+    respx.get("https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions").mock(
         return_value=httpx.Response(200, json=[_rx_payload()])
     )
-    respx.get("https://billing-test-1234567890.test.databricksapps.com/api/v1/invoices").mock(
+    respx.get("https://billing-1234567890.test.databricksapps.com/api/v1/invoices").mock(
         return_value=httpx.Response(200, json=[_invoice_payload()])
     )
 
@@ -184,17 +184,17 @@ def test_partial_failure_returns_200_with_partial_flag():
 
 @respx.mock
 def test_required_patient_failure_returns_502():
-    respx.get(f"https://patient-test-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
+    respx.get(f"https://patient-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
         return_value=httpx.Response(503, text="patient-svc is down")
     )
     # Other mocks just to keep them happy (they may or may not be called
     # depending on gather scheduling, but partial-failure handling on the
     # required call kicks in regardless).
     for url in [
-        "https://appointment-test-1234567890.test.databricksapps.com/api/v1/appointments",
-        "https://lab-test-1234567890.test.databricksapps.com/api/v1/lab-orders",
-        "https://prescription-test-1234567890.test.databricksapps.com/api/v1/prescriptions",
-        "https://billing-test-1234567890.test.databricksapps.com/api/v1/invoices",
+        "https://appointment-1234567890.test.databricksapps.com/api/v1/appointments",
+        "https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders",
+        "https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions",
+        "https://billing-1234567890.test.databricksapps.com/api/v1/invoices",
     ]:
         respx.get(url).mock(return_value=httpx.Response(200, json=[]))
 
@@ -210,14 +210,14 @@ def test_required_patient_failure_returns_502():
 def test_authorization_header_fallback_works():
     """Per auth.py priority: Authorization: Bearer ... is honored when
     X-Forwarded-Access-Token is absent (used by upstream proxies in tests)."""
-    respx.get(f"https://patient-test-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
+    respx.get(f"https://patient-1234567890.test.databricksapps.com/api/v1/patients/{_PATIENT_ID}").mock(
         return_value=httpx.Response(200, json=_patient_payload())
     )
     for url in [
-        "https://appointment-test-1234567890.test.databricksapps.com/api/v1/appointments",
-        "https://lab-test-1234567890.test.databricksapps.com/api/v1/lab-orders",
-        "https://prescription-test-1234567890.test.databricksapps.com/api/v1/prescriptions",
-        "https://billing-test-1234567890.test.databricksapps.com/api/v1/invoices",
+        "https://appointment-1234567890.test.databricksapps.com/api/v1/appointments",
+        "https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders",
+        "https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions",
+        "https://billing-1234567890.test.databricksapps.com/api/v1/invoices",
     ]:
         respx.get(url).mock(return_value=httpx.Response(200, json=[]))
 

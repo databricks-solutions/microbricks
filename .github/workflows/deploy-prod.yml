@@ -58,7 +58,7 @@ jobs:
     # Settings -> Environments -> prod.
     environment:
       name: prod
-      url: https://hc-portal-prod.databricksapps.com
+      url: https://hc-portal.databricksapps.com
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,7 +107,7 @@ jobs:
           for svc in patient provider appointment lab prescription billing; do
             echo "→ Migrating $svc against prod/production"
             cd "services/$svc"
-            ENDPOINT="projects/$svc-prod/branches/production/endpoints/primary"
+            ENDPOINT="projects/$svc/branches/production/endpoints/primary"
             HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
@@ -122,11 +122,41 @@ jobs:
       - name: bundle deploy
         run: databricks bundle deploy -t prod
 
+      - name: bundle run (submit a new app deployment for each app)
+        # See deploy-dev.yml for the rationale: `bundle deploy` alone leaves
+        # apps UNAVAILABLE / serving the previous code. Same service-first,
+        # BFF-last order so cross-app ACL targets exist when hc-portal binds.
+        run: |
+          set -euo pipefail
+          for key in patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app; do
+            echo "→ databricks bundle run -t prod $key"
+            databricks bundle run -t prod "$key"
+          done
+
+      - name: Wait for RUNNING state
+        run: |
+          set -euo pipefail
+          for app in patient provider appointment lab prescription billing hc-portal; do
+            for i in $(seq 1 20); do
+              STATE=$(databricks apps get "$app" -p hc-prod -o json \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
+              echo "  $app attempt $i/20: state=$STATE"
+              if [[ "$STATE" == "RUNNING" ]]; then
+                break
+              fi
+              if (( i == 20 )); then
+                echo "::error::$app did not reach RUNNING within 5 minutes"
+                exit 1
+              fi
+              sleep 15
+            done
+          done
+
       - name: Smoke test
         run: |
           set -euo pipefail
           for app in patient provider appointment lab prescription billing hc-portal; do
-            URL=$(databricks apps get "$app-prod" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            URL=$(databricks apps get "$app" -p hc-prod -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
             echo "Smoke: $app -> $URL"
             curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
           done

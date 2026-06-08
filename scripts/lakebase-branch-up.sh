@@ -21,7 +21,7 @@
 #
 # Outputs (on stdout, key=value, one per line) the values the caller drops
 # into a `.env` file or sets as DAB --var overrides:
-#   ENDPOINT_NAME=projects/<svc>-dev/branches/feat-<slug>/endpoints/primary
+#   ENDPOINT_NAME=projects/<svc>/branches/feat-<slug>/endpoints/primary
 #   PGHOST=<host>
 #   LAKEBASE_BRANCH=feat-<slug>
 #
@@ -45,10 +45,10 @@ case "$SLUG" in
   *)               BRANCH="feat-$SLUG" ;;
 esac
 
-# `bundle.target` for feature branches is always `dev` — the project name
-# pattern is the contract from `resources/<svc>.yml`:
-#   project_id: <svc>-${bundle.target}
-PROJECT="projects/$SERVICE-dev"
+# Project name is just `<svc>` (no `${bundle.target}` suffix) — the contract
+# from `resources/<svc>.yml`. Feature branches always live in the dev
+# workspace; the `production` source branch in that workspace is the seed.
+PROJECT="projects/$SERVICE"
 BRANCH_PATH="$PROJECT/branches/$BRANCH"
 ENDPOINT_PATH="$BRANCH_PATH/endpoints/primary"
 
