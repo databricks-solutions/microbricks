@@ -399,24 +399,47 @@ jobs:
             --var "app_name_suffix=-$SLUG" \
             --var "lakebase_branch=$SLUG"
 
-      - name: bundle run preview apps (submit deployment per app)
+      - name: bundle run preview apps (submit deployment per app, in parallel)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
         # `bundle deploy` alone does NOT submit a new app deployment — the
         # preview apps stay UNAVAILABLE until `bundle run` kicks them. See
         # https://docs.databricks.com/aws/en/dev-tools/databricks-apps/cicd-github-actions
         # The `--var` overrides must match the deploy step so `bundle run`
-        # resolves each app key against the same per-PR root_path. Order:
-        # services first, hc-portal last, so the BFF's `CAN_USE` targets
-        # are live before it attaches.
+        # resolves each app key against the same per-PR root_path.
+        #
+        # All 7 in parallel — see deploy-dev.yml for the rationale (CAN_USE
+        # ACLs wire at deploy-time, so there's no ordering dependency at
+        # bundle-run time).
         run: |
           set -euo pipefail
-          for key in patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app; do
-            echo "→ databricks bundle run -t dev $key (slug=$SLUG)"
-            databricks bundle run -t dev "$key" \
-              --var "app_name_suffix=-$SLUG" \
-              --var "lakebase_branch=$SLUG"
+          LOG_DIR=$(mktemp -d)
+          KEYS=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+          PIDS=()
+          for KEY in "${KEYS[@]}"; do
+            (
+              databricks bundle run -t dev "$KEY" \
+                --var "app_name_suffix=-$SLUG" \
+                --var "lakebase_branch=$SLUG"
+            ) > "$LOG_DIR/$KEY.log" 2>&1 &
+            PID=$!
+            PIDS+=("$PID")
+            echo "→ kicked $KEY (pid=$PID, slug=$SLUG)"
           done
+          FAIL=0
+          for i in "${!KEYS[@]}"; do
+            KEY="${KEYS[$i]}"
+            if wait "${PIDS[$i]}"; then
+              echo "✓ $KEY"
+              tail -3 "$LOG_DIR/$KEY.log" | sed 's/^/    /'
+            else
+              echo "::error::$KEY failed; full log:"
+              cat "$LOG_DIR/$KEY.log"
+              FAIL=1
+            fi
+          done
+          rm -rf "$LOG_DIR"
+          (( FAIL == 0 )) || exit 1
 
       - name: Wait for RUNNING state
         env:
@@ -439,24 +462,49 @@ jobs:
             done
           done
 
-      - name: Smoke-test preview
+      - name: Smoke-test preview (honest /healthz check)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
+        # See deploy-dev.yml for the full rationale. Same shape, but the
+        # deployed app names carry the per-PR slug suffix.
+        #
+        # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
         run: |
           set -euo pipefail
-          # Hit /healthz on every deployed preview app. The platform OBO
-          # gateway lets unauthenticated /healthz through (it's the only
-          # path that's unguarded by design). /api/v1/* should 401.
-          # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
-          for app in patient provider appointment lab prescription billing hc-portal; do
-            URL=$(databricks apps get "$app-$SLUG" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
-            if [[ -z "$URL" ]]; then
-              echo "::error::App $app-$SLUG has no URL — deploy may have failed"
-              exit 1
+          TOKEN=$(databricks auth token -p hc-dev -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          assert_healthz() {
+            local app="$1" path="$2"
+            local url body_file http_code body
+            url=$(databricks apps get "$app" -p hc-dev -o json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            if [[ -z "$url" ]]; then
+              echo "::error::$app has no URL — deploy may have failed"
+              return 1
             fi
-            echo "Smoke: $app -> $URL"
-            curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 30 \
+              -H "Authorization: Bearer $TOKEN" \
+              "$url$path")
+            body=$(cat "$body_file"); rm -f "$body_file"
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::$app $path -> HTTP $http_code (expected 200)"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            if [[ "$body" != '{"ok":true}' ]]; then
+              echo "::error::$app $path -> 200 but body mismatch:"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            echo "✓ $app $path -> 200 $body"
+          }
+          FAIL=0
+          for app in patient provider appointment lab prescription billing; do
+            assert_healthz "$app-$SLUG" "/api/v1/healthz" || FAIL=1
           done
+          assert_healthz "hc-portal-$SLUG" "/api/bff/healthz" || FAIL=1
+          (( FAIL == 0 )) || exit 1
 
       - name: Comment preview URLs on PR
         uses: actions/github-script@v7

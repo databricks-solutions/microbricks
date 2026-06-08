@@ -207,11 +207,21 @@ run_migrations() {
 }
 
 # ---------------------------------------------------------------------------
-# `bundle run` every app (services first, BFF last) so the platform actually
-# submits a new app deployment. `bundle deploy` alone only syncs source and
+# `bundle run` every app IN PARALLEL so the platform actually submits a new
+# app deployment per resource. `bundle deploy` alone only syncs source and
 # resource specs — without `bundle run`, the platform keeps serving the
 # previous code (or stays UNAVAILABLE on first deploy). See the docs:
 #   https://docs.databricks.com/aws/en/dev-tools/databricks-apps/cicd-github-actions
+#
+# All 7 are kicked in parallel: cross-app CAN_USE ACLs were wired by
+# `bundle deploy` (deploy-time, not run-time) and the Apps platform allows
+# concurrent deployments across distinct apps. Total wall time becomes
+# max(app startup) rather than sum(app startup) — typically 5× faster than
+# sequential.
+#
+# Each background run logs to its own file under a tmpdir so the on-screen
+# output stays readable; on failure the failing app's full log is dumped.
+#
 # Extra args (e.g. `--var app_name_suffix=-feat-foo`) are passed through so
 # the PR-preview shape resolves against the same root_path as the deploy.
 # ---------------------------------------------------------------------------
@@ -219,14 +229,36 @@ bundle_run_apps() {
   local target="$1" profile="$2"
   shift 2
   local extra_args=("$@")
-  step "bundle run (each app, -t $target)"
-  for key in patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app; do
+  step "bundle run (all apps in parallel, -t $target)"
+
+  local log_dir
+  log_dir=$(mktemp -d)
+  local -a keys pids
+  keys=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+  pids=()
+  for key in "${keys[@]}"; do
     (
       cd "$REPO_ROOT"
       databricks bundle run -t "$target" -p "$profile" "${extra_args[@]}" "$key"
-    )
-    ok "$key kicked"
+    ) > "$log_dir/$key.log" 2>&1 &
+    local pid=$!
+    pids+=("$pid")
+    printf '  → kicked %s (pid=%s)\n' "$key" "$pid"
   done
+
+  local fail=0 i key
+  for i in "${!keys[@]}"; do
+    key="${keys[$i]}"
+    if wait "${pids[$i]}"; then
+      ok "$key"
+    else
+      err "$key failed; full log:"
+      cat "$log_dir/$key.log" >&2
+      fail=1
+    fi
+  done
+  rm -rf "$log_dir"
+  (( fail == 0 )) || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -258,8 +290,18 @@ wait_for_running() {
 }
 
 # ---------------------------------------------------------------------------
-# Smoke each deployed app. Mirrors the smoke step at the end of every
-# deploy job. Just hits /healthz; expects 200.
+# Honest /healthz smoke for every deployed app. The platform OBO gateway
+# intercepts every request — without an SP Bearer token we'd either be
+# 302'd to the OAuth login page or get an HTML login body with status 200,
+# both of which `curl -fsS` silently passes. So we:
+#   - mint an SP token via `databricks auth token` (M2M-compatible in
+#     CLI >= 0.213),
+#   - assert HTTP 200 exactly (not <400),
+#   - assert body == {"ok":true} (the literal app/BFF healthz response).
+#
+# Services mount the route at /api/v1/healthz; hc-portal at /api/bff/healthz.
+# See services/<svc>/src/<svc>/app.py and
+# frontend/hc-portal/src/hc_portal/backend/routers/aggregations.py.
 # ---------------------------------------------------------------------------
 smoke_apps() {
   # `target` only labels the log line — app names dropped the `-<target>`
@@ -267,24 +309,48 @@ smoke_apps() {
   # previews where suffix is `-feat-<slug>`).
   local target="$1" suffix="$2" profile="$3"
   step "smoke test ($target$suffix)"
-  for app in patient provider appointment lab prescription billing hc-portal; do
-    local name="$app$suffix" url
+
+  local token
+  token=$(databricks auth token -p "$profile" -o json \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+  _assert_healthz() {
+    local name="$1" path="$2" url body_file http_code body
     url=$(databricks apps get "$name" -p "$profile" -o json 2>/dev/null \
-      | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("url",""))' 2>/dev/null || echo "")
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))' 2>/dev/null || echo "")
     if [[ -z "$url" ]]; then
       err "  $name: no URL (deploy may have failed)"
       return 1
     fi
-    local code
-    code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/healthz" --max-time 10 || echo "000")
-    if [[ "$code" == "200" ]]; then
-      printf '  %s -> /healthz %s\n' "$name" "$code"
-    else
-      err "  $name: /healthz $code"
+    body_file=$(mktemp)
+    http_code=$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 30 \
+      -H "Authorization: Bearer $token" \
+      "$url$path" 2>/dev/null || echo "000")
+    body=$(cat "$body_file"); rm -f "$body_file"
+    if [[ "$http_code" != "200" ]]; then
+      err "  $name $path -> HTTP $http_code (expected 200)"
+      err "    body (first 300): $(printf '%s' "$body" | head -c 300)"
       return 1
     fi
+    if [[ "$body" != '{"ok":true}' ]]; then
+      err "  $name $path -> 200 but body mismatch:"
+      err "    body (first 300): $(printf '%s' "$body" | head -c 300)"
+      return 1
+    fi
+    printf '  ✓ %s %s -> 200 %s\n' "$name" "$path" "$body"
+  }
+
+  local fail=0
+  for app in patient provider appointment lab prescription billing; do
+    _assert_healthz "$app$suffix" "/api/v1/healthz" || fail=1
   done
-  ok "all 7 apps return /healthz 200"
+  _assert_healthz "hc-portal$suffix" "/api/bff/healthz" || fail=1
+
+  if (( fail == 0 )); then
+    ok "all 7 apps return 200 {\"ok\":true}"
+  else
+    return 1
+  fi
 }
 
 # ===========================================================================

@@ -136,16 +136,33 @@ jobs:
       - name: bundle deploy
         run: databricks bundle deploy -t test
 
-      - name: bundle run (submit a new app deployment for each app)
-        # See deploy-dev.yml for the rationale: `bundle deploy` alone leaves
-        # apps UNAVAILABLE / serving the previous code. Same service-first,
-        # BFF-last order so cross-app ACL targets exist when hc-portal binds.
+      - name: bundle run (submit a new app deployment for each app, in parallel)
+        # See deploy-dev.yml for the rationale + parallelization shape.
         run: |
           set -euo pipefail
-          for key in patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app; do
-            echo "→ databricks bundle run -t test $key"
-            databricks bundle run -t test "$key"
+          LOG_DIR=$(mktemp -d)
+          KEYS=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+          PIDS=()
+          for KEY in "${KEYS[@]}"; do
+            ( databricks bundle run -t test "$KEY" ) > "$LOG_DIR/$KEY.log" 2>&1 &
+            PID=$!
+            PIDS+=("$PID")
+            echo "→ kicked $KEY (pid=$PID)"
           done
+          FAIL=0
+          for i in "${!KEYS[@]}"; do
+            KEY="${KEYS[$i]}"
+            if wait "${PIDS[$i]}"; then
+              echo "✓ $KEY"
+              tail -3 "$LOG_DIR/$KEY.log" | sed 's/^/    /'
+            else
+              echo "::error::$KEY failed; full log:"
+              cat "$LOG_DIR/$KEY.log"
+              FAIL=1
+            fi
+          done
+          rm -rf "$LOG_DIR"
+          (( FAIL == 0 )) || exit 1
 
       - name: Wait for RUNNING state
         run: |
@@ -166,11 +183,42 @@ jobs:
             done
           done
 
-      - name: Smoke test
+      - name: Smoke test (honest /healthz check)
+        # See deploy-dev.yml for the full rationale. Same SP-token + strict
+        # status + body assertion shape.
         run: |
           set -euo pipefail
-          for app in patient provider appointment lab prescription billing hc-portal; do
-            URL=$(databricks apps get "$app" -p hc-test -o json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
-            echo "Smoke: $app -> $URL"
-            curl -fsS -o /dev/null -w "  /healthz -> %{http_code}\n" "$URL/healthz"
+          TOKEN=$(databricks auth token -p hc-test -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          assert_healthz() {
+            local app="$1" path="$2"
+            local url body_file http_code body
+            url=$(databricks apps get "$app" -p hc-test -o json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            if [[ -z "$url" ]]; then
+              echo "::error::$app has no URL"
+              return 1
+            fi
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 30 \
+              -H "Authorization: Bearer $TOKEN" \
+              "$url$path")
+            body=$(cat "$body_file"); rm -f "$body_file"
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::$app $path -> HTTP $http_code (expected 200)"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            if [[ "$body" != '{"ok":true}' ]]; then
+              echo "::error::$app $path -> 200 but body mismatch:"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            echo "✓ $app $path -> 200 $body"
+          }
+          FAIL=0
+          for app in patient provider appointment lab prescription billing; do
+            assert_healthz "$app" "/api/v1/healthz" || FAIL=1
           done
+          assert_healthz hc-portal "/api/bff/healthz" || FAIL=1
+          (( FAIL == 0 )) || exit 1
