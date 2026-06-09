@@ -283,14 +283,18 @@ async def update_lab_order_status(
     Cancellation just records the status; no soft delete.
     """
     now = datetime.now(timezone.utc)
-    set_clauses = ["status = %s", "updated_at = now()", "updated_by = %s"]
+    set_clauses: list[sql.SQL] = [
+        sql.SQL("status = %s"),
+        sql.SQL("updated_at = now()"),
+        sql.SQL("updated_by = %s"),
+    ]
     args: list[object] = [payload.status, email]
     if payload.status == "collected":
-        set_clauses.append("collected_at = COALESCE(collected_at, %s)")
+        set_clauses.append(sql.SQL("collected_at = COALESCE(collected_at, %s)"))
         args.append(now)
     elif payload.status == "resulted":
-        set_clauses.append("collected_at = COALESCE(collected_at, %s)")
-        set_clauses.append("resulted_at = COALESCE(resulted_at, %s)")
+        set_clauses.append(sql.SQL("collected_at = COALESCE(collected_at, %s)"))
+        set_clauses.append(sql.SQL("resulted_at = COALESCE(resulted_at, %s)"))
         args.append(now)
         args.append(now)
     args.append(lab_order_id)
@@ -304,7 +308,7 @@ async def update_lab_order_status(
             WHERE id = %s AND deleted_at IS NULL
             RETURNING id, patient_id, ordering_provider_id, appointment_id,
                       panel_code, status, ordered_at, collected_at, resulted_at
-            """).format(sql.SQL(", ").join(sql.SQL(c) for c in set_clauses)),
+            """).format(sql.SQL(", ").join(set_clauses)),
             tuple(args),
         )
         row = await cur.fetchone()
