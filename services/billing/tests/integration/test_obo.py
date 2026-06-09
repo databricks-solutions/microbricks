@@ -32,7 +32,8 @@ async def test_route_isolates_users(
     assert r1.status_code == 200
     assert r2.status_code == 200
     # Two users with different UC permissions should see different rows.
-    assert {p["id"] for p in r1.json()} != {p["id"] for p in r2.json()}
+    # List endpoints return a paginated envelope: {items, total, limit, offset}.
+    assert {p["id"] for p in r1.json()["items"]} != {p["id"] for p in r2.json()["items"]}
 
 
 @pytest.mark.integration

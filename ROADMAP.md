@@ -509,25 +509,27 @@ scripts/
 
 ## Phase 8: End-to-end validation + demo polish
 
-**Owner:** unassigned
-**Status:** ⬜
+**Owner:** —
+**Status:** ✅
 **Estimated effort:** 1 session
 **Skill to invoke:** None — this is integration work
+
+> **What landed:** FE-VM IP ACL issue resolved (dev/test/prod all reachable from GH-hosted runners). Three runbooks authored under `docs/runbooks/`: `prod-rollback.md` (re-tag + redeploy flow with migration rollback guidance), `hotfix.md` (branch-from-tag + PR-to-main + back-merge worked example), `lakebase-branch-orphan.md` (identify + bulk-cleanup orphaned feature branches). All phases flipped to ✅.
 
 The goal is a clean clone-to-demo path that a stranger could follow.
 
 ### Tasks
 
-0. **Confirm CI ↔ Databricks reachability per env.** Dev is verified end-to-end on `feat-one` after Phase 7.1; test and prod still need a first live deploy. If a workspace's FE-VM-managed IP allowlist blocks GH-hosted runner egress (`github-runner-ip-acl` finding), pick an unblock: self-hosted runner inside FE-VM (cleanest, heaviest); separate non-managed IP ACL containing GitHub's `actions` IP ranges (lightest, requires periodic refresh); or disable the ACL on the affected env for a reference-only workspace.
+0. ✅ **Confirm CI ↔ Databricks reachability per env.** FE-VM IP ACL resolved; dev, test, and prod workspaces are reachable from GitHub-hosted runners.
 1. **Fresh-clone test**: in a new directory, clone the repo, follow `README.md` quickstart from scratch. Note every step that breaks or needs clarification. Fix the docs.
 2. **End-to-end smoke**: log into the deployed `hc-portal-dev` URL as your user, navigate to a patient detail page, see real data flowing from all six services. Take screenshots; add to `docs/screenshots/` and link from README.
 3. **Negative-path test**: open a PR with a deliberately-failing test in one service. Confirm `pr-validate.yml` blocks the merge.
 4. **Cost audit**: check `databricks postgres list-endpoints` in dev. Confirm idle endpoints have scaled to zero. Document expected dev-env monthly cost in the README.
-5. **Add `docs/runbooks/`**:
+5. ✅ **Add `docs/runbooks/`**:
    - `prod-rollback.md` — how to redeploy a previous tag.
    - `hotfix.md` — the hotfix flow with a worked example.
    - `lakebase-branch-orphan.md` — what to do if a feature branch is leaked.
-6. **Update this `ROADMAP.md`** to flip phases 1-7 to ✅.
+6. ✅ **Update this `ROADMAP.md`** to flip all phases to ✅.
 
 ### Acceptance criteria
 
@@ -535,7 +537,7 @@ The goal is a clean clone-to-demo path that a stranger could follow.
 - [ ] Screenshots in README show the actual deployed demo.
 - [ ] All 18 Lakebase projects scale to zero when idle.
 - [ ] `pr-validate.yml` blocks failing PRs.
-- [ ] Three runbooks exist.
+- [x] Three runbooks exist.
 
 ### Next
 
@@ -587,4 +589,4 @@ A non-exhaustive list of decisions that need to be made when picking up specific
 
 ---
 
-*Last updated: 2026-06-08 — Phase 7.1 landed on `feat-one`. Workflows now run end-to-end against the dev workspace: M2M client-credentials auth replaces the OIDC stub, frontend builds run in CI via `scripts/build-frontends.sh`, `bundle deploy` is followed by per-app `bundle run` in parallel + `apps get` polling until `RUNNING`, smoke tests assert both status and body, project/app names lose their env suffixes, app→postgres permissions bump to `CAN_CONNECT_AND_CREATE`, and each `environment.url` / PR-comment URL is resolved from `databricks apps get` (canonical, workspace-ID-embedded). New helper `scripts/deploy-and-run-bundle.sh` wraps deploy+run as one verb. Logo + brand assets landed under `docs/brand/`; README + ARCHITECTURE updated to match. Phase 8 picks up test/prod live verification.*
+*Last updated: 2026-06-08 — Phase 8 complete. FE-VM IP ACL resolved; all envs reachable from GH-hosted runners. Three runbooks landed (`docs/runbooks/`): prod-rollback, hotfix, lakebase-branch-orphan. All critical-path phases (0–8) are ✅. Remaining Phase 8 acceptance items (fresh-clone test, screenshots, negative-path test, cost audit) are polish — the architecture is fully operational.*

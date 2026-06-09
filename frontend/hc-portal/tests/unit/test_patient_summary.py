@@ -90,6 +90,19 @@ def _invoice_payload() -> dict:
     }
 
 
+def _page(items: list[dict], total: int | None = None) -> dict:
+    """Wrap a row list in the paginated envelope every backend list
+    endpoint now returns (`{items, total, limit, offset}`). Existing tests
+    only care about `items`, but we still set `total` honestly so the
+    contract stays self-consistent."""
+    return {
+        "items": items,
+        "total": total if total is not None else len(items),
+        "limit": 50,
+        "offset": 0,
+    }
+
+
 def test_missing_token_returns_401():
     r = client.get(f"/api/bff/patient-summary/{_PATIENT_ID}")
     assert r.status_code == 401
@@ -112,19 +125,34 @@ def test_summary_happy_path_forwards_token_to_every_service():
     )
     respx.get("https://appointment-1234567890.test.databricksapps.com/api/v1/appointments").mock(
         side_effect=lambda req: (captured.__setitem__("appointment", req)
-                                 or httpx.Response(200, json=[_appointment_payload()]))
+                                 or httpx.Response(200, json=_page([_appointment_payload()])))
     )
     respx.get("https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders").mock(
         side_effect=lambda req: (captured.__setitem__("lab", req)
-                                 or httpx.Response(200, json=[_lab_payload()]))
+                                 or httpx.Response(200, json=_page([_lab_payload()])))
     )
     respx.get("https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions").mock(
         side_effect=lambda req: (captured.__setitem__("rx", req)
-                                 or httpx.Response(200, json=[_rx_payload()]))
+                                 or httpx.Response(200, json=_page([_rx_payload()])))
     )
     respx.get("https://billing-1234567890.test.databricksapps.com/api/v1/invoices").mock(
         side_effect=lambda req: (captured.__setitem__("billing", req)
-                                 or httpx.Response(200, json=[_invoice_payload()]))
+                                 or httpx.Response(200, json=_page([_invoice_payload()])))
+    )
+    # patient_summary resolves provider names per-page via provider.list_by_ids
+    # — mock that here so the call doesn't fall through to a real HTTP attempt.
+    respx.get("https://provider-1234567890.test.databricksapps.com/api/v1/providers").mock(
+        side_effect=lambda req: (captured.__setitem__("provider", req)
+                                 or httpx.Response(200, json=_page([{
+                                     "id": _PROVIDER_ID,
+                                     "npi": "1234567890",
+                                     "given_name": "Sarah",
+                                     "family_name": "Lee",
+                                     "credential_suffix": "MD",
+                                     "email": "sarah@example.com",
+                                     "is_active": True,
+                                     "organization_id": "00000000-0000-0000-0000-000000000001",
+                                 }])))
     )
 
     r = client.get(
@@ -141,8 +169,10 @@ def test_summary_happy_path_forwards_token_to_every_service():
     assert body["partial"] is False
 
     # Token forwarded to every downstream as BOTH headers (rule #4 in
-    # hc-bff-pattern SKILL.md "The four BFF rules").
-    assert set(captured) == {"patient", "appointment", "lab", "rx", "billing"}
+    # hc-bff-pattern SKILL.md "The four BFF rules"). Provider is now in the
+    # set too because patient_summary resolves provider names per-page via
+    # `provider.list_by_ids` instead of fetching the whole provider table.
+    assert set(captured) == {"patient", "appointment", "lab", "rx", "billing", "provider"}
     for name, req in captured.items():
         assert req.headers["authorization"] == "Bearer user-1-token", name
         assert req.headers["x-forwarded-access-token"] == "user-1-token", name
@@ -157,16 +187,19 @@ def test_partial_failure_returns_200_with_partial_flag():
         return_value=httpx.Response(200, json=_patient_payload())
     )
     respx.get("https://appointment-1234567890.test.databricksapps.com/api/v1/appointments").mock(
-        return_value=httpx.Response(200, json=[_appointment_payload()])
+        return_value=httpx.Response(200, json=_page([_appointment_payload()]))
     )
     respx.get("https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders").mock(
         return_value=httpx.Response(503, text="lab is down")
     )
     respx.get("https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions").mock(
-        return_value=httpx.Response(200, json=[_rx_payload()])
+        return_value=httpx.Response(200, json=_page([_rx_payload()]))
     )
     respx.get("https://billing-1234567890.test.databricksapps.com/api/v1/invoices").mock(
-        return_value=httpx.Response(200, json=[_invoice_payload()])
+        return_value=httpx.Response(200, json=_page([_invoice_payload()]))
+    )
+    respx.get("https://provider-1234567890.test.databricksapps.com/api/v1/providers").mock(
+        return_value=httpx.Response(200, json=_page([]))
     )
 
     r = client.get(
@@ -195,8 +228,9 @@ def test_required_patient_failure_returns_502():
         "https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders",
         "https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions",
         "https://billing-1234567890.test.databricksapps.com/api/v1/invoices",
+        "https://provider-1234567890.test.databricksapps.com/api/v1/providers",
     ]:
-        respx.get(url).mock(return_value=httpx.Response(200, json=[]))
+        respx.get(url).mock(return_value=httpx.Response(200, json=_page([])))
 
     r = client.get(
         f"/api/bff/patient-summary/{_PATIENT_ID}",
@@ -218,8 +252,9 @@ def test_authorization_header_fallback_works():
         "https://lab-1234567890.test.databricksapps.com/api/v1/lab-orders",
         "https://prescription-1234567890.test.databricksapps.com/api/v1/prescriptions",
         "https://billing-1234567890.test.databricksapps.com/api/v1/invoices",
+        "https://provider-1234567890.test.databricksapps.com/api/v1/providers",
     ]:
-        respx.get(url).mock(return_value=httpx.Response(200, json=[]))
+        respx.get(url).mock(return_value=httpx.Response(200, json=_page([])))
 
     r = client.get(
         f"/api/bff/patient-summary/{_PATIENT_ID}",
