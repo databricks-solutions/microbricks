@@ -94,7 +94,14 @@ jobs:
         run: uv sync --all-groups
       - name: BFF tests
         working-directory: frontend/${{ matrix.frontend }}
-        run: uv run pytest -m 'not integration' -q
+        run: |
+          rc=0
+          uv run pytest -m 'not integration' -q || rc=$?
+          if [[ $rc -eq 5 ]]; then
+            echo "No tests collected — skipping"
+            exit 0
+          fi
+          exit $rc
 
   deploy:
     needs: [discover, test, test-frontends]
