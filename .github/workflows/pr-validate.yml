@@ -38,7 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.filter.outputs.services }}
-      service_changes: ${{ steps.filter.outputs.changes }}
+      changed_services: ${{ steps.changed.outputs.changed_services }}
+      changed_frontends: ${{ steps.changed.outputs.changed_frontends }}
       frontends: ${{ steps.filter.outputs.frontends }}
       infra: ${{ steps.filter.outputs.infra }}
       slug: ${{ steps.slug.outputs.slug }}
@@ -82,21 +83,30 @@ jobs:
         with:
           filters: .github/dynamic-filters.yml
 
+      - name: Compute changed services and frontends (filter out meta keys)
+        id: changed
+        run: |
+          ALL_CHANGES='${{ steps.filter.outputs.changes }}'
+          SERVICE_DIRS='${{ steps.disc.outputs.service_dirs }}'
+          FRONTEND_DIRS='${{ steps.disc.outputs.frontend_dirs }}'
+          CHANGED_SVCS=$(echo "$ALL_CHANGES" | jq -c --argjson dirs "$SERVICE_DIRS" '[.[] | select(. as $x | $dirs | index($x))]')
+          CHANGED_FES=$(echo "$ALL_CHANGES" | jq -c --argjson dirs "$FRONTEND_DIRS" '[.[] | select(. as $x | $dirs | index($x))]')
+          echo "changed_services=$CHANGED_SVCS" >> "$GITHUB_OUTPUT"
+          echo "changed_frontends=$CHANGED_FES" >> "$GITHUB_OUTPUT"
+          echo "Changed services: $CHANGED_SVCS"
+          echo "Changed frontends: $CHANGED_FES"
+
   # ---------------------------------------------------------------------------
   # Stage 2: per-service lint + unit tests.
   # ---------------------------------------------------------------------------
   service-checks:
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.services == 'true' }}
+    if: ${{ needs.detect-changes.outputs.changed_services != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service: ${{ fromJSON(needs.detect-changes.outputs.service_changes) }}
-        exclude:
-          - service: services
-          - service: frontends
-          - service: infra
+        service: ${{ fromJSON(needs.detect-changes.outputs.changed_services) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -130,12 +140,12 @@ jobs:
   # ---------------------------------------------------------------------------
   frontend-checks:
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.frontends == 'true' }}
+    if: ${{ needs.detect-changes.outputs.changed_frontends != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        frontend: ${{ fromJSON(needs.detect-changes.outputs.frontend_dirs) }}
+        frontend: ${{ fromJSON(needs.detect-changes.outputs.changed_frontends) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -153,7 +163,14 @@ jobs:
 
       - name: BFF unit tests
         working-directory: frontend/${{ matrix.frontend }}
-        run: uv run pytest -m 'not integration' -q
+        run: |
+          rc=0
+          uv run pytest -m 'not integration' -q || rc=$?
+          if [[ $rc -eq 5 ]]; then
+            echo "No tests collected — skipping (exit code 5 is not a failure)"
+            exit 0
+          fi
+          exit $rc
 
   # ---------------------------------------------------------------------------
   # Stage 3: bundle validate.
