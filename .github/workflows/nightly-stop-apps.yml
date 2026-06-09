@@ -1,0 +1,98 @@
+name: nightly-stop-apps
+
+# Stop all Databricks apps across dev, test, and prod workspaces to save
+# costs overnight. Apps auto-resume on next deploy or manual start.
+# Runs at 22:00 UTC (off-hours); can also be triggered manually.
+
+on:
+  schedule:
+    - cron: '3 22 * * *'  # 22:03 UTC nightly; off-minute to avoid API surge
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-stop-apps
+  cancel-in-progress: false
+
+env:
+  DATABRICKS_CLI_VERSION: "1.2.1"
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env_name: dev
+            host_var: DATABRICKS_HOST_DEV
+            profile: hc-dev
+          - env_name: test
+            host_var: DATABRICKS_HOST_TEST
+            profile: hc-test
+          - env_name: prod
+            host_var: DATABRICKS_HOST_PROD
+            profile: hc-prod
+    environment:
+      name: ${{ matrix.env_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write Databricks profile
+        env:
+          DATABRICKS_HOST: ${{ vars[matrix.host_var] }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [${{ matrix.profile }}]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p ${{ matrix.profile }}
+
+      - name: Stop all running apps
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          echo "→ Listing apps in ${{ matrix.env_name }}..."
+          APPS=$(databricks apps list -p "$PROFILE" -o json \
+            | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          apps = data if isinstance(data, list) else data.get("apps", [])
+          for app in apps:
+              state = app.get("app_status", {}).get("state", "")
+              if state == "RUNNING":
+                  print(app["name"])
+          ')
+          if [[ -z "$APPS" ]]; then
+            echo "  No running apps found — nothing to stop."
+            exit 0
+          fi
+          FAIL=0
+          while IFS= read -r app; do
+            echo "  Stopping $app..."
+            if databricks apps stop "$app" -p "$PROFILE" 2>&1; then
+              echo "  ✓ $app stopped"
+            else
+              echo "  ::warning::Failed to stop $app"
+              FAIL=1
+            fi
+          done <<< "$APPS"
+          echo "Done (${{ matrix.env_name }})"
+          # Don't fail the job for individual app stop failures — best-effort.
