@@ -26,6 +26,7 @@ app-name = "clinic-sim"
 app-slug = "clinic_sim"
 app-entrypoint = "clinic_sim.backend.app:app"
 api-prefix = "/api"
+healthz = "/api/sim/healthz"
 metadata-path = "src/clinic_sim/_metadata.py"
 
 [tool.apx.ui]

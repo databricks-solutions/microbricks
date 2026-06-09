@@ -77,7 +77,9 @@ def discover_projects(base_dir: Path, project_type: str) -> list[dict]:
         api_prefix = meta.get("api-prefix", "/api/v1")
         bundle_key = app_slug.replace("-", "_") + "_app"
 
-        if project_type == "service":
+        if "healthz" in meta:
+            healthz = meta["healthz"]
+        elif project_type == "service":
             healthz = f"{api_prefix}/healthz"
         else:
             healthz = f"{api_prefix}/bff/healthz"
