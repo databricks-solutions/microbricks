@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from psycopg import sql
 from pydantic import BaseModel, Field
 
 from ..auth import user_email, user_token
@@ -297,13 +298,13 @@ async def update_lab_order_status(
     pool = await get_pool(email, token)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            f"""
+            sql.SQL("""
             UPDATE lab_order
-            SET {", ".join(set_clauses)}
+            SET {}
             WHERE id = %s AND deleted_at IS NULL
             RETURNING id, patient_id, ordering_provider_id, appointment_id,
                       panel_code, status, ordered_at, collected_at, resulted_at
-            """,
+            """).format(sql.SQL(", ").join(sql.SQL(c) for c in set_clauses)),
             tuple(args),
         )
         row = await cur.fetchone()
