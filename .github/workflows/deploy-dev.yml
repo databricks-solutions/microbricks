@@ -1,10 +1,10 @@
 name: deploy-dev
 
 # Trunk-dev deploy. Triggered on every push to `develop` (PRs land here via
-# squash-merge). Deploys the canonical (suffix-less) bundle:
-#   patient / provider / appointment / lab / prescription / billing / hc-portal
+# squash-merge). Deploys the canonical (suffix-less) bundle — all services
+# and frontends discovered dynamically from the filesystem.
 # (no `-dev` suffix — each env is its own workspace, so the namespace is
-# scoped already). All six service apps bind to their `production` Lakebase
+# scoped already). All service apps bind to their `production` Lakebase
 # branch (the var default), which is the long-lived dev branch — separate
 # from the per-PR `feat-<slug>` branches owned by pr-validate.yml.
 #
@@ -31,15 +31,44 @@ env:
   DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
   DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
   DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-        
+
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Discover: enumerate services + frontends from the filesystem so every
+  # downstream job uses a dynamic list rather than a hardcoded one.
+  # ---------------------------------------------------------------------------
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      service_dirs: ${{ steps.disc.outputs.service_dirs }}
+      frontend_dirs: ${{ steps.disc.outputs.frontend_dirs }}
+      all_bundle_keys: ${{ steps.disc.outputs.all_bundle_keys }}
+      all_app_names: ${{ steps.disc.outputs.all_app_names }}
+      services_json: ${{ steps.disc.outputs.services_json }}
+      frontends_json: ${{ steps.disc.outputs.frontends_json }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - id: disc
+        run: |
+          OUT=$(./scripts/discover-projects.sh)
+          echo "service_dirs=$(echo "$OUT" | jq -c '.service_dirs')" >> "$GITHUB_OUTPUT"
+          echo "frontend_dirs=$(echo "$OUT" | jq -c '.frontend_dirs')" >> "$GITHUB_OUTPUT"
+          echo "all_bundle_keys=$(echo "$OUT" | jq -c '.all_bundle_keys')" >> "$GITHUB_OUTPUT"
+          echo "all_app_names=$(echo "$OUT" | jq -c '.all_app_names')" >> "$GITHUB_OUTPUT"
+          echo "services_json=$(echo "$OUT" | jq -c '.services')" >> "$GITHUB_OUTPUT"
+          echo "frontends_json=$(echo "$OUT" | jq -c '.frontends')" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service: [patient, provider, appointment, lab, prescription, billing]
+        service: ${{ fromJSON(needs.discover.outputs.service_dirs) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,8 +82,13 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: uv run pytest -m 'not integration' -q
 
-  test-portal:
+  test-frontends:
+    needs: discover
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        frontend: ${{ fromJSON(needs.discover.outputs.frontend_dirs) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,20 +96,17 @@ jobs:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v3
       - name: uv sync (BFF)
-        working-directory: frontend/hc-portal
+        working-directory: frontend/${{ matrix.frontend }}
         run: uv sync --all-groups
       - name: BFF unit tests
-        working-directory: frontend/hc-portal
+        working-directory: frontend/${{ matrix.frontend }}
         run: uv run pytest -m 'not integration' -q
 
   deploy:
-    needs: [test, test-portal]
+    needs: [discover, test, test-frontends]
     runs-on: ubuntu-latest
     environment:
       name: dev
-      # Resolved at step-completion time from `databricks apps get`. The
-      # short-form hostname is NOT the canonical URL — the real one embeds
-      # the workspace ID. See the `portal-url` step below.
       url: ${{ steps.portal-url.outputs.url }}
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +123,6 @@ jobs:
           DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-        # See pr-validate.yml for the rationale.
         run: |
           mkdir -p "$HOME"
           cat > "$HOME/.databrickscfg" <<EOF
@@ -105,27 +135,20 @@ jobs:
           databricks current-user me -p hc-dev
 
       - name: Ensure Lakebase projects exist (idempotent)
-        # Project lifecycle is OUTSIDE the bundle (see resources/patient.yml
-        # for the rationale). The bundle's app->postgres references will
-        # 404 on first deploy if the project doesn't exist yet.
+        env:
+          SERVICE_DIRS: ${{ needs.discover.outputs.service_dirs }}
         run: |
-          for svc in patient provider appointment lab prescription billing; do
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
             ./scripts/lakebase-project-up.sh "$svc" dev hc-dev
           done
 
-      - name: Run migrations (production branches, all six services)
-        # Same alembic-driven flow as pr-validate; the only difference is the
-        # endpoint (`production` vs `feat-<slug>`) and the matrix scope (we
-        # always run all six on trunk-dev because there's no per-PR scoping).
-        # No LOCAL_DEV_TOKEN export here: `databricks auth token` only works
-        # for U2M, and we authenticate as an SP via M2M in CI. The alembic
-        # env.py falls back to the SDK's default credential chain, which picks
-        # up DATABRICKS_HOST + DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET
-        # off the workflow env automatically.
+      - name: Run migrations (production branches, all services)
+        env:
+          SERVICE_DIRS: ${{ needs.discover.outputs.service_dirs }}
         run: |
           set -euo pipefail
           export PGUSER=$(databricks current-user me -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
-          for svc in patient provider appointment lab prescription billing; do
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
             echo "→ Migrating $svc against production"
             cd "services/$svc"
             ENDPOINT="projects/$svc/branches/production/endpoints/primary"
@@ -140,14 +163,6 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
 
-      # `bundle deploy` syncs source files but does not build anything. Each
-      # apx project's React UI builds to `src/<pkg>/__dist__/` (gitignored),
-      # and the FastAPI factory only mounts the SPA when that directory is
-      # present at runtime. Without this build step, the deployed app would
-      # serve the BFF/API only and 404 on every page route. See
-      # `scripts/build-frontends.sh` and the `sync.include` block in
-      # `databricks.yml` for the matching pieces. apx delegates the install
-      # + vite invocation to bun, so bun is a hard prereq.
       - name: Set up bun
         uses: oven-sh/setup-bun@v2
 
@@ -171,23 +186,12 @@ jobs:
         run: databricks bundle deploy -t dev
 
       - name: bundle run (submit a new app deployment for each app, in parallel)
-        # `bundle deploy` syncs source + updates resource specs but does NOT
-        # submit a new app deployment — without `bundle run`, the platform
-        # keeps serving the previous source (or stays UNAVAILABLE on first
-        # deploy). Per Databricks Apps CI/CD guidance:
-        # https://docs.databricks.com/aws/en/dev-tools/databricks-apps/cicd-github-actions
-        #
-        # All 7 in parallel: `bundle deploy` already wired the cross-app
-        # CAN_USE ACLs (deploy-time, not run-time), and the Apps platform
-        # allows concurrent deployments across distinct apps. Total wall
-        # time becomes max(app startup) instead of sum(app startup).
-        # Each subshell logs to its own file; failures surface the relevant
-        # log without drowning the workflow output in interleaved success
-        # output.
+        env:
+          ALL_BUNDLE_KEYS: ${{ needs.discover.outputs.all_bundle_keys }}
         run: |
           set -euo pipefail
           LOG_DIR=$(mktemp -d)
-          KEYS=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+          mapfile -t KEYS < <(echo "$ALL_BUNDLE_KEYS" | jq -r '.[]')
           PIDS=()
           for KEY in "${KEYS[@]}"; do
             ( databricks bundle run -t dev "$KEY" ) > "$LOG_DIR/$KEY.log" 2>&1 &
@@ -211,13 +215,11 @@ jobs:
           (( FAIL == 0 )) || exit 1
 
       - name: Wait for RUNNING state
-        # `bundle run` returns once it signals start, but the app may still
-        # be initializing (and can still fail on missing deps, bad env vars,
-        # port conflicts). Poll `apps get` per the docs' recommendation:
-        # 5 minute ceiling per app (20 attempts × 15 s).
+        env:
+          ALL_APP_NAMES: ${{ needs.discover.outputs.all_app_names }}
         run: |
           set -euo pipefail
-          for app in patient provider appointment lab prescription billing hc-portal; do
+          for app in $(echo "$ALL_APP_NAMES" | jq -r '.[]'); do
             for i in $(seq 1 20); do
               STATE=$(databricks apps get "$app" -p hc-dev -o json \
                 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
@@ -234,29 +236,9 @@ jobs:
           done
 
       - name: Smoke test (honest /healthz check)
-        # Final HTTP sanity check on top of the platform RUNNING state. The
-        # check has to be strict because Databricks Apps' OBO gateway sits
-        # in front of every app — an unauthenticated request gets either
-        # a 302 to OAuth login or a 200-with-HTML-login-body, both of which
-        # silently fool `curl -fsS`. Today's apps mount the route at:
-        #   services -> /api/v1/healthz   (see services/<svc>/src/<svc>/app.py)
-        #   hc-portal -> /api/bff/healthz (see frontend/.../routers/aggregations.py)
-        # Both handlers return the literal {"ok":true}.
-        # So we:
-        #   1. Mint an SP OAuth token (M2M; the SP already has CAN_MANAGE
-        #      on every app via the bundle deploy that created it).
-        #   2. Send it as `Authorization: Bearer` so the OBO gateway
-        #      forwards through.
-        #   3. Assert HTTP status is EXACTLY 200 (not <400).
-        #   4. Assert the body is EXACTLY {"ok":true} (catches OAuth HTML
-        #      pages that come back with status 200).
-        #
-        # Why curl + /oidc/v1/token, not `databricks auth token`:
-        #   `databricks auth token` only supports U2M (refresh-token) auth.
-        #   We're authenticating as a service principal via M2M, so we hit
-        #   the workspace's OAuth token endpoint with the client_credentials
-        #   grant and `all-apis` scope — the same path the Databricks SDK
-        #   uses internally for M2M.
+        env:
+          SERVICES_JSON: ${{ needs.discover.outputs.services_json }}
+          FRONTENDS_JSON: ${{ needs.discover.outputs.frontends_json }}
         run: |
           set -euo pipefail
           TOKEN=$(curl -sS --fail \
@@ -292,20 +274,26 @@ jobs:
             echo "✓ $app $path -> 200 $body"
           }
           FAIL=0
-          for app in patient provider appointment lab prescription billing; do
-            assert_healthz "$app" "/api/v1/healthz" || FAIL=1
+          for row in $(echo "$SERVICES_JSON" | jq -c '.[]'); do
+            app=$(echo "$row" | jq -r '.app_name')
+            healthz=$(echo "$row" | jq -r '.healthz')
+            assert_healthz "$app" "$healthz" || FAIL=1
           done
-          assert_healthz hc-portal "/api/bff/healthz" || FAIL=1
+          for row in $(echo "$FRONTENDS_JSON" | jq -c '.[]'); do
+            app=$(echo "$row" | jq -r '.app_name')
+            healthz=$(echo "$row" | jq -r '.healthz')
+            assert_healthz "$app" "$healthz" || FAIL=1
+          done
           (( FAIL == 0 )) || exit 1
 
-      - name: Resolve hc-portal URL for environment link
+      - name: Resolve portal URL for environment link
         id: portal-url
-        # Feeds `environment.url` so the GitHub Environments tab points at
-        # the real workspace-qualified Apps URL (which embeds the workspace
-        # ID) rather than a guessable short form.
+        env:
+          FRONTENDS_JSON: ${{ needs.discover.outputs.frontends_json }}
         run: |
           set -euo pipefail
-          URL=$(databricks apps get hc-portal -p hc-dev -o json \
+          PORTAL=$(echo "$FRONTENDS_JSON" | jq -r '.[0].app_name')
+          URL=$(databricks apps get "$PORTAL" -p hc-dev -o json \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "Resolved hc-portal URL: $URL"
+          echo "Resolved $PORTAL URL: $URL"

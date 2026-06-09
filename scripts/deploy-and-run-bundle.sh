@@ -81,21 +81,13 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 
-# The bundle resource keys for every app. Order matters: services first so
-# the BFFs (hc_portal_app, clinic_sim_app) can ACL-attach to running
-# siblings — same order the bundle itself prefers. Both BFFs go last; they
-# both fan out to the six services and have no inter-BFF dependency, so
-# their relative order doesn't matter.
-APP_KEYS=(
-  patient_app
-  provider_app
-  appointment_app
-  lab_app
-  prescription_app
-  billing_app
-  hc_portal_app
-  clinic_sim_app
-)
+# Dynamically discover all bundle resource keys from the filesystem.
+# Services come first (alphabetical), then frontends — so the BFFs can
+# ACL-attach to running siblings.
+APP_KEYS=()
+while IFS= read -r key; do
+  APP_KEYS+=("$key")
+done < <("$SCRIPT_DIR/discover-projects.sh" | jq -r '.all_bundle_keys[]')
 
 log()  { printf '\n┃ %s\n' "$*"; }
 step() { printf '\n▶ %s\n'  "$*"; }

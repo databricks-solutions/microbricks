@@ -2,25 +2,14 @@ name: pr-validate
 
 # Triggered on every PR open / synchronize / reopen against develop, release/*,
 # or main. The job:
-#   1. Detects which services + the BFF + the bundle root changed.
-#   2. Runs lint + unit tests for each changed service in parallel.
-#   3. Provisions a Lakebase feature-branch per changed *backend* service.
-#   4. Runs `alembic upgrade head` against each feature branch.
-#   5. Deploys a preview bundle (`databricks bundle deploy -t dev`) with
-#      `app_name_suffix=-<slug>` and `lakebase_branch=<slug>` (the slug already
-#      carries its `feat-`/`hotfix-` prefix from sanitize-branch-slug.sh) so the
-#      preview apps live alongside the trunk-dev deploy without colliding.
-#   6. Smoke-tests the preview, then comments the URLs on the PR.
-#
-# The branch -> environment map is documented in
-# `.claude/skills/hc-gitflow-cicd/SKILL.md`.
-#
-# Auth: short-lived OIDC token from GitHub -> Databricks dev workspace.
-# OIDC trust must be set up out-of-band (Phase 0 of ROADMAP.md).
-# If the workspace doesn't yet support OIDC, swap `use-oidc: true` for a
-# `token: ${{ secrets.DATABRICKS_DEV_TOKEN }}` line and store the token as a
-# GitHub *environment* secret (gated by the `dev` environment's protection
-# rules) — never as a repo-level secret.
+#   1. Discovers services + frontends dynamically from the filesystem.
+#   2. Detects which services + frontends + infra changed.
+#   3. Runs lint + unit tests for each changed service in parallel.
+#   4. Provisions a Lakebase feature-branch per changed *backend* service.
+#   5. Runs `alembic upgrade head` against each feature branch.
+#   6. Deploys a preview bundle (`databricks bundle deploy -t dev`) with
+#      `app_name_suffix=-<slug>` and `lakebase_branch=<slug>`.
+#   7. Smoke-tests the preview, then comments the URLs on the PR.
 
 on:
   pull_request:
@@ -29,10 +18,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write  # post the preview-URL comment
+  pull-requests: write
 
-# A second push to the same PR cancels the previous run — we don't need to
-# finish validating an obsolete commit.
 concurrency:
   group: pr-validate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -45,59 +32,58 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Stage 1: figure out which services were touched. dorny/paths-filter emits a
-  # JSON list of changed *filter keys* on `outputs.changes` — we feed that to
-  # the next jobs as a matrix.
+  # Stage 1: discover projects + detect changes.
   # ---------------------------------------------------------------------------
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.filter.outputs.services }}
       service_changes: ${{ steps.filter.outputs.changes }}
-      portal: ${{ steps.filter.outputs.portal }}
-      infra:  ${{ steps.filter.outputs.infra }}
-      slug:   ${{ steps.slug.outputs.slug }}
+      frontends: ${{ steps.filter.outputs.frontends }}
+      infra: ${{ steps.filter.outputs.infra }}
+      slug: ${{ steps.slug.outputs.slug }}
+      service_dirs: ${{ steps.disc.outputs.service_dirs }}
+      frontend_dirs: ${{ steps.disc.outputs.frontend_dirs }}
+      all_bundle_keys: ${{ steps.disc.outputs.all_bundle_keys }}
+      all_app_names: ${{ steps.disc.outputs.all_app_names }}
+      services_json: ${{ steps.disc.outputs.services_json }}
+      frontends_json: ${{ steps.disc.outputs.frontends_json }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Discover projects
+        id: disc
+        run: |
+          OUT=$(./scripts/discover-projects.sh)
+          echo "service_dirs=$(echo "$OUT" | jq -c '.service_dirs')" >> "$GITHUB_OUTPUT"
+          echo "frontend_dirs=$(echo "$OUT" | jq -c '.frontend_dirs')" >> "$GITHUB_OUTPUT"
+          echo "all_bundle_keys=$(echo "$OUT" | jq -c '.all_bundle_keys')" >> "$GITHUB_OUTPUT"
+          echo "all_app_names=$(echo "$OUT" | jq -c '.all_app_names')" >> "$GITHUB_OUTPUT"
+          echo "services_json=$(echo "$OUT" | jq -c '.services')" >> "$GITHUB_OUTPUT"
+          echo "frontends_json=$(echo "$OUT" | jq -c '.frontends')" >> "$GITHUB_OUTPUT"
 
       - name: Compute branch slug
         id: slug
         run: |
-          # github.head_ref is the source branch on a PR (e.g. feature/HC-123-...).
-          # The slug script is the same one local devs and the cleanup workflow
-          # use, so the resulting Lakebase branch + app suffix all line up.
           SLUG=$(./scripts/sanitize-branch-slug.sh "${{ github.head_ref }}")
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
           echo "Computed slug: $SLUG"
+
+      - name: Generate dynamic path filters
+        run: ./scripts/discover-projects.sh --path-filters > .github/dynamic-filters.yml
 
       - name: Detect changed paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          # `services` is the matrix-feeding key — it lists every backend
-          # service that changed. `portal` and `infra` are checked separately
-          # because their downstream behavior differs.
-          filters: |
-            services:
-              - 'services/**'
-            patient:        'services/patient/**'
-            provider:       'services/provider/**'
-            appointment:    'services/appointment/**'
-            lab:            'services/lab/**'
-            prescription:   'services/prescription/**'
-            billing:        'services/billing/**'
-            portal:
-              - 'frontend/hc-portal/**'
-            infra:
-              - 'databricks.yml'
-              - 'resources/**'
-              - 'scripts/**'
-              - '.github/workflows/**'
+          filters: .github/dynamic-filters.yml
 
   # ---------------------------------------------------------------------------
-  # Stage 2: per-service lint + unit tests. Matrix is the list of changed
-  # services from Stage 1. If the PR only touches `infra` or `portal`, this
-  # job is skipped entirely.
+  # Stage 2: per-service lint + unit tests.
   # ---------------------------------------------------------------------------
   service-checks:
     needs: detect-changes
@@ -106,14 +92,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Only run the matrix for services this PR actually touched. The
-        # complement of `detect-changes.outputs.changes` is filtered to the
-        # known service slugs so a future filter (e.g. `portal`) doesn't end
-        # up in this job.
         service: ${{ fromJSON(needs.detect-changes.outputs.service_changes) }}
         exclude:
           - service: services
-          - service: portal
+          - service: frontends
           - service: infra
     steps:
       - uses: actions/checkout@v4
@@ -132,8 +114,6 @@ jobs:
 
       - name: Lint
         working-directory: services/${{ matrix.service }}
-        # `ty check` is what the dev-group ty package provides; fall back to a
-        # syntax-only compile if ty isn't installed in this service's deps.
         run: |
           if uv run ty --help >/dev/null 2>&1; then
             uv run ty check src
@@ -146,13 +126,16 @@ jobs:
         run: uv run pytest -m 'not integration' -q
 
   # ---------------------------------------------------------------------------
-  # Stage 2b: BFF + frontend checks. Independent of service-checks so they can
-  # run in parallel.
+  # Stage 2b: frontend BFF checks.
   # ---------------------------------------------------------------------------
-  portal-checks:
+  frontend-checks:
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.portal == 'true' }}
+    if: ${{ needs.detect-changes.outputs.frontends == 'true' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        frontend: ${{ fromJSON(needs.detect-changes.outputs.frontend_dirs) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,39 +148,27 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: uv sync (BFF)
-        working-directory: frontend/hc-portal
+        working-directory: frontend/${{ matrix.frontend }}
         run: uv sync --all-groups
 
       - name: BFF unit tests
-        working-directory: frontend/hc-portal
+        working-directory: frontend/${{ matrix.frontend }}
         run: uv run pytest -m 'not integration' -q
 
-  # `bun install` for the React UI is intentionally NOT in `portal-checks`:
-  # the BFF tests don't need node_modules, and the install routinely hung on
-  # GH-hosted runners (~18 min and counting on PR #1) — likely a registry
-  # timeout interacting with the OpenTelemetry + Radix UI dep set. The UI
-  # is built later in `preview-deploy` (via `scripts/build-frontends.sh`)
-  # immediately before `bundle deploy`, so a broken UI build still fails
-  # the PR — just at the deploy stage instead of as a parallel typecheck.
-  # If we ever want to gate earlier (parallel with `service-checks` for
-  # faster feedback), add a separate `ui-checks` job with `actions/cache`
-  # keyed on bun.lock and a hard timeout.
-
   # ---------------------------------------------------------------------------
-  # Stage 3: bundle validate. Always runs — even if only `services/<svc>/README.md`
-  # changed, we still want to know the bundle's still well-formed. Cheap.
+  # Stage 3: bundle validate.
   # ---------------------------------------------------------------------------
   bundle-validate:
     needs: detect-changes
     runs-on: ubuntu-latest
-    # Bind to the `dev` GitHub environment so this job sees the
-    # DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET *environment* secrets
-    # configured in repo Settings -> Environments -> dev. Same per-env-
-    # scoped secrets are reused by `preview-deploy` below.
     environment:
       name: dev
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Install Databricks CLI
         uses: databricks/setup-cli@main
@@ -209,18 +180,6 @@ jobs:
           DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-        # Why a config file (vs. relying on env vars alone):
-        #   `databricks.yml` declares `workspace.profile: hc-dev` for the
-        #   `dev` target so local developers stay on a familiar
-        #   `~/.databrickscfg` profile. The CLI resolves that profile via
-        #   the config file even when env vars are also set, so we have to
-        #   materialize the named section in CI too. M2M client-secret
-        #   auth — the secret is an *environment* secret gated by the
-        #   `dev` env's protection rules, not a repo-wide secret.
-        # Migration to OIDC: replace `client_secret = ${DATABRICKS_CLIENT_SECRET}`
-        # with `auth_type = github-oidc` once federation policies are bound
-        # on each workspace's account-level service principal, then drop the
-        # secret from `dev` / `test` / `prod` environment secrets.
         run: |
           mkdir -p "$HOME"
           cat > "$HOME/.databrickscfg" <<EOF
@@ -233,45 +192,26 @@ jobs:
           databricks current-user me --profile hc-dev
 
       - name: bundle validate
-        # The slug from sanitize-branch-slug.sh already carries the `feat-`
-        # (or `hotfix-`) prefix; do NOT prepend another `feat-` here.
         run: |
           databricks bundle validate -t dev \
             --var "app_name_suffix=-${{ needs.detect-changes.outputs.slug }}" \
             --var "lakebase_branch=${{ needs.detect-changes.outputs.slug }}"
 
   # ---------------------------------------------------------------------------
-  # Stage 4: deploy a preview. Only runs when:
-  #   - service-checks passed (or was skipped because no service changed), AND
-  #   - portal-checks passed (or was skipped), AND
-  #   - bundle-validate passed.
-  #
-  # This stage:
-  #   - Provisions a Lakebase feature branch for each *changed* service.
-  #   - Runs `alembic upgrade head` against each feature branch.
-  #   - Deploys the bundle with the per-PR overrides.
-  #   - Smoke-tests the deployed apps.
-  #   - Comments the URL list on the PR.
+  # Stage 4: deploy a preview.
   # ---------------------------------------------------------------------------
   preview-deploy:
-    needs: [detect-changes, service-checks, portal-checks, bundle-validate]
-    # GH actions only runs `needs` when ALL succeed by default; we want this
-    # job when service-checks and portal-checks were *skipped* too, so we
-    # explicitly relax via `always() && !cancelled() && no-failure`.
+    needs: [detect-changes, service-checks, frontend-checks, bundle-validate]
     if: |
       always() &&
       !cancelled() &&
       needs.detect-changes.result == 'success' &&
       needs.bundle-validate.result == 'success' &&
       (needs.service-checks.result == 'success' || needs.service-checks.result == 'skipped') &&
-      (needs.portal-checks.result == 'success' || needs.portal-checks.result == 'skipped')
+      (needs.frontend-checks.result == 'success' || needs.frontend-checks.result == 'skipped')
     runs-on: ubuntu-latest
     environment:
       name: dev
-      # Resolved at step-completion time from `databricks apps get`. The
-      # short-form hostname (`hc-portal-<slug>.databricksapps.com`) is NOT
-      # the canonical URL — the real one embeds the workspace ID — so we
-      # let the apps API tell us. See the `urls` step below.
       url: ${{ steps.urls.outputs.portal_url }}
     steps:
       - uses: actions/checkout@v4
@@ -294,7 +234,6 @@ jobs:
           DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-        # See bundle-validate's auth step for the rationale; same shape.
         run: |
           mkdir -p "$HOME"
           cat > "$HOME/.databrickscfg" <<EOF
@@ -308,68 +247,42 @@ jobs:
 
       - name: Compute changed-services list
         id: changed
+        env:
+          ALL_CHANGES: ${{ needs.detect-changes.outputs.service_changes }}
+          SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
         run: |
-          # Build the JSON array of changed services (from the matrix). We
-          # need the explicit list later to provision Lakebase branches +
-          # run migrations. dorny/paths-filter already emitted them as
-          # `outputs.changes`; we filter to known service slugs here.
-          ALL='${{ needs.detect-changes.outputs.service_changes }}'
-          KNOWN=("patient" "provider" "appointment" "lab" "prescription" "billing")
           OUT=()
-          for svc in "${KNOWN[@]}"; do
-            if echo "$ALL" | grep -q "\"$svc\""; then
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
+            if echo "$ALL_CHANGES" | grep -q "\"$svc\""; then
               OUT+=("$svc")
             fi
           done
-          # Space-separated for the bash loops below.
           echo "services=${OUT[*]}" >> "$GITHUB_OUTPUT"
           echo "Changed services: ${OUT[*]}"
 
       - name: Ensure Lakebase projects exist (idempotent)
-        # Project lifecycle is OUTSIDE the bundle (see resources/patient.yml
-        # for the rationale). Branch creation below requires the project.
+        env:
+          SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
         run: |
-          for svc in patient provider appointment lab prescription billing; do
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
             ./scripts/lakebase-project-up.sh "$svc" dev hc-dev
           done
 
-      - name: Provision Lakebase feature branches (all six services)
+      - name: Provision Lakebase feature branches (all services)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-        # `$SLUG` already carries its `feat-`/`hotfix-` prefix (see
-        # sanitize-branch-slug.sh) — pass it through unchanged.
-        # Why all six, not just the changed ones:
-        #   The bundle's per-service app->postgres references resolve to
-        #   `<slug>`, so EVERY app's deploy would fail if the corresponding
-        #   feature branch didn't exist.
-        #   Branches are copy-on-write from `production` and scale to zero
-        #   when idle, so the cost of provisioning all six per PR is
-        #   negligible — the simpler-than-per-service-vars trade.
-        # `lakebase-branch-up.sh` is idempotent (re-running on a force-push
-        # is a no-op).
+          SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
         run: |
           set -euo pipefail
-          for svc in patient provider appointment lab prescription billing; do
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
             ./scripts/lakebase-branch-up.sh "$svc" "$SLUG" hc-dev
           done
 
       - name: Run migrations against feature branches
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-        # We only run alembic on services this PR touched. Untouched services
-        # have empty Lakebase feature branches; alembic against an empty DB
-        # works (head == 0001_initial), but skipping saves CI time and makes
-        # the per-service migrations diff visible in the workflow log.
-        # The trunk-dev `production` branch already has the prior migrations
-        # applied; the COW from `production` carries them forward.
         run: |
           set -euo pipefail
-          # No LOCAL_DEV_TOKEN export here: `databricks auth token` only works
-          # for U2M, and we authenticate as an SP via M2M in CI. The alembic
-          # env.py falls back to the SDK's default credential chain, which
-          # picks up DATABRICKS_HOST + DATABRICKS_CLIENT_ID +
-          # DATABRICKS_CLIENT_SECRET off the workflow env automatically and
-          # then calls generate_database_credential itself.
           for svc in ${{ steps.changed.outputs.services }}; do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
@@ -386,14 +299,6 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
 
-      # `bundle deploy` syncs source files but does not build anything. Each
-      # apx project's React UI builds to `src/<pkg>/__dist__/` (gitignored),
-      # and the FastAPI factory only mounts the SPA when that directory is
-      # present at runtime. Without this, the preview app would serve the
-      # BFF/API only and 404 on every page route. See
-      # `scripts/build-frontends.sh` and the `sync.include` block in
-      # `databricks.yml`. apx delegates the install + vite invocation to
-      # bun, so bun is a hard prereq.
       - name: Set up bun
         uses: oven-sh/setup-bun@v2
 
@@ -416,16 +321,6 @@ jobs:
       - name: Deploy preview bundle
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-        # `bundle deploy -t dev` with the two `--var` overrides:
-        #   - `app_name_suffix=-<slug>` -> all 7 apps suffixed
-        #   - `lakebase_branch=<slug>`  -> all 6 postgres resources point
-        #     at the feature branch (which exists for changed services and
-        #     does NOT exist for untouched services — those would 404 on
-        #     connect, which is fine because nobody will exercise them in
-        #     this preview).
-        # `$SLUG` carries its `feat-`/`hotfix-` prefix already.
-        # The root_path includes the suffix too, so this preview's bundle
-        # state is isolated from the trunk-dev deploy.
         run: |
           databricks bundle deploy -t dev \
             --var "app_name_suffix=-$SLUG" \
@@ -434,19 +329,11 @@ jobs:
       - name: bundle run preview apps (submit deployment per app, in parallel)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-        # `bundle deploy` alone does NOT submit a new app deployment — the
-        # preview apps stay UNAVAILABLE until `bundle run` kicks them. See
-        # https://docs.databricks.com/aws/en/dev-tools/databricks-apps/cicd-github-actions
-        # The `--var` overrides must match the deploy step so `bundle run`
-        # resolves each app key against the same per-PR root_path.
-        #
-        # All 7 in parallel — see deploy-dev.yml for the rationale (CAN_USE
-        # ACLs wire at deploy-time, so there's no ordering dependency at
-        # bundle-run time).
+          ALL_BUNDLE_KEYS: ${{ needs.detect-changes.outputs.all_bundle_keys }}
         run: |
           set -euo pipefail
           LOG_DIR=$(mktemp -d)
-          KEYS=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+          mapfile -t KEYS < <(echo "$ALL_BUNDLE_KEYS" | jq -r '.[]')
           PIDS=()
           for KEY in "${KEYS[@]}"; do
             (
@@ -476,9 +363,10 @@ jobs:
       - name: Wait for RUNNING state
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
+          ALL_APP_NAMES: ${{ needs.detect-changes.outputs.all_app_names }}
         run: |
           set -euo pipefail
-          for app in patient provider appointment lab prescription billing hc-portal; do
+          for app in $(echo "$ALL_APP_NAMES" | jq -r '.[]'); do
             for i in $(seq 1 20); do
               STATE=$(databricks apps get "$app-$SLUG" -p hc-dev -o json \
                 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
@@ -497,19 +385,8 @@ jobs:
       - name: Smoke-test preview (honest /healthz check)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-        # See deploy-dev.yml for the full rationale. Same shape, but the
-        # deployed app names carry the per-PR slug suffix.
-        #
-        # `$SLUG` already includes its `feat-`/`hotfix-` prefix.
-        #
-        # Token minting note: we cannot use `databricks auth token` here —
-        # that command only supports U2M tokens, and CI authenticates as an
-        # SP via M2M (client_id + client_secret). Instead, we hit the
-        # workspace's OAuth endpoint with the client_credentials grant and
-        # `all-apis` scope, which is the M2M-equivalent path the SDK takes
-        # internally. The SP already has CAN_MANAGE on every preview app
-        # (created by its own `bundle deploy` above), so the gateway forwards
-        # the bearer through to /healthz.
+          SERVICES_JSON: ${{ needs.detect-changes.outputs.services_json }}
+          FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
         run: |
           set -euo pipefail
           TOKEN=$(curl -sS --fail \
@@ -545,72 +422,74 @@ jobs:
             echo "✓ $app $path -> 200 $body"
           }
           FAIL=0
-          for app in patient provider appointment lab prescription billing; do
-            assert_healthz "$app-$SLUG" "/api/v1/healthz" || FAIL=1
+          for row in $(echo "$SERVICES_JSON" | jq -c '.[]'); do
+            app=$(echo "$row" | jq -r '.app_name')
+            healthz=$(echo "$row" | jq -r '.healthz')
+            assert_healthz "$app-$SLUG" "$healthz" || FAIL=1
           done
-          assert_healthz "hc-portal-$SLUG" "/api/bff/healthz" || FAIL=1
+          for row in $(echo "$FRONTENDS_JSON" | jq -c '.[]'); do
+            app=$(echo "$row" | jq -r '.app_name')
+            healthz=$(echo "$row" | jq -r '.healthz')
+            assert_healthz "$app-$SLUG" "$healthz" || FAIL=1
+          done
           (( FAIL == 0 )) || exit 1
 
       - name: Collect preview app URLs
         id: urls
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-        # The "pretty" hostname (e.g. patient-feat-x.databricksapps.com) is NOT
-        # the real URL — Databricks Apps embeds the workspace ID into the
-        # hostname (e.g. patient-feat-x-7405606704848118.18.azure.databricksapps.com).
-        # We can't construct that on our own, so we ask the apps API for the
-        # canonical `url` field (same source the smoke-test step uses) and
-        # emit a JSON map keyed by the *bare* service name for the comment
-        # step to consume.
+          ALL_APP_NAMES: ${{ needs.detect-changes.outputs.all_app_names }}
+          FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, subprocess
           slug = os.environ["SLUG"]
-          services = ["patient","provider","appointment","lab","prescription","billing","hc-portal"]
+          all_apps = json.loads(os.environ["ALL_APP_NAMES"])
+          frontends = json.loads(os.environ["FRONTENDS_JSON"])
           urls = {}
-          for s in services:
-              app = f"{s}-{slug}"
+          for app_name in all_apps:
+              app = f"{app_name}-{slug}"
               out = subprocess.check_output(
                   ["databricks","apps","get",app,"-p","hc-dev","-o","json"],
                   text=True,
               )
-              urls[s] = json.loads(out).get("url","") or ""
+              urls[app_name] = json.loads(out).get("url","") or ""
           print(f"map={json.dumps(urls)}")
-          print(f"portal_url={urls.get('hc-portal','')}")
+          portal_name = frontends[0]["app_name"] if frontends else ""
+          print(f"portal_url={urls.get(portal_name,'')}")
           PY
 
       - name: Comment preview URLs on PR
         uses: actions/github-script@v7
         env:
           URLS_JSON: ${{ steps.urls.outputs.map }}
+          ALL_APP_NAMES: ${{ needs.detect-changes.outputs.all_app_names }}
         with:
           script: |
-            const slug = '${{ needs.detect-changes.outputs.slug }}';  // already prefixed: e.g. "feat-hc-123"
+            const slug = '${{ needs.detect-changes.outputs.slug }}';
             const urls = JSON.parse(process.env.URLS_JSON || '{}');
-            const services = ['patient','provider','appointment','lab','prescription','billing','hc-portal'];
+            const allApps = JSON.parse(process.env.ALL_APP_NAMES || '[]');
             const body = [
-              '### 🔬 Preview deploy ready',
+              '### Preview deploy ready',
               '',
               `Slug: \`${slug}\``,
-              `Lakebase branches provisioned for: \`${{ steps.changed.outputs.services }}\``,
+              `Changed services: \`${{ steps.changed.outputs.services }}\``,
               '',
               '| App | URL |',
               '|---|---|',
-              ...services.map(s => `| \`${s}-${slug}\` | ${urls[s] || `https://${s}-${slug}.databricksapps.com`} |`),
+              ...allApps.map(s => `| \`${s}-${slug}\` | ${urls[s] || 'N/A'} |`),
               '',
               'Login with your Databricks user; the BFF forwards your OBO token to each backend.',
               '',
               '_Closing or merging this PR triggers `pr-cleanup.yml` which destroys the preview + Lakebase branches._',
             ].join('\n');
-            // Replace any prior preview comment from this workflow so the PR
-            // doesn't accumulate one comment per push.
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo:  context.repo.repo,
               issue_number: context.payload.pull_request.number,
             });
-            const prior = comments.find(c => c.body && c.body.includes('🔬 Preview deploy ready'));
+            const prior = comments.find(c => c.body && c.body.includes('Preview deploy ready'));
             if (prior) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner, repo: context.repo.repo,

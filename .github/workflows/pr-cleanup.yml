@@ -40,10 +40,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Discover services
+        id: disc
+        run: |
+          OUT=$(./scripts/discover-projects.sh)
+          echo "service_dirs=$(echo "$OUT" | jq -c '.service_dirs')" >> "$GITHUB_OUTPUT"
+
       - name: Compute branch slug
         id: slug
         run: |
-          # Same transform as pr-validate.yml, fed the same PR head ref.
           SLUG=$(./scripts/sanitize-branch-slug.sh "${{ github.head_ref }}")
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
 
@@ -91,11 +100,9 @@ jobs:
       - name: Tear down Lakebase feature branches
         env:
           SLUG: ${{ steps.slug.outputs.slug }}
-        # We don't track which services this PR provisioned (state would
-        # need to live somewhere durable), so we sweep all six. Each call
-        # is idempotent and tolerant of "branch already gone".
+          SERVICE_DIRS: ${{ steps.disc.outputs.service_dirs }}
         run: |
-          for svc in patient provider appointment lab prescription billing; do
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
             ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" hc-dev
           done
 

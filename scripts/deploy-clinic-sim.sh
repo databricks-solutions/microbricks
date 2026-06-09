@@ -63,10 +63,13 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 SLUG_SH="$SCRIPT_DIR/sanitize-branch-slug.sh"
 BRANCH_UP="$SCRIPT_DIR/lakebase-branch-up.sh"
 
-# Same six services the simulator BFF fans out to. Used both for the optional
-# `--feature` Lakebase branch provisioning AND for the pre-flight check that
+# Dynamically discover services from the filesystem. Used for optional
+# `--feature` Lakebase branch provisioning AND the pre-flight check that
 # every backend app already exists in the target workspace.
-SERVICES=(patient provider appointment lab prescription billing)
+SERVICES=()
+while IFS= read -r dir; do
+  SERVICES+=("$dir")
+done < <("$SCRIPT_DIR/discover-projects.sh" | jq -r '.service_dirs[]')
 
 # Bundle resource key the script deploys. Must match resources/clinic-sim.yml.
 APP_KEY="clinic_sim_app"
