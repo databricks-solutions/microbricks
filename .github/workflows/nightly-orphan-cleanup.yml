@@ -49,6 +49,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Discover services
+        id: disc
+        run: |
+          OUT=$(./scripts/discover-projects.sh)
+          echo "service_dirs=$(echo "$OUT" | jq -c '.service_dirs')" >> "$GITHUB_OUTPUT"
+
       - uses: databricks/setup-cli@main
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
@@ -95,9 +105,11 @@ jobs:
           echo "Allowlist size: $(wc -l < .allowlist)"
 
       - name: Reap orphaned Lakebase branches
+        env:
+          SERVICE_DIRS: ${{ steps.disc.outputs.service_dirs }}
         run: |
           set -euo pipefail
-          for svc in patient provider appointment lab prescription billing; do
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
             echo "→ Scanning projects/$svc"
             BRANCHES=$(databricks postgres list-branches "projects/$svc" -p hc-dev -o json 2>/dev/null \
               | python3 -c 'import json,sys; [print(b["name"]) for b in json.load(sys.stdin)]' \

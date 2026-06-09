@@ -16,20 +16,28 @@
 #
 #   ci-local.sh pr-validate [--no-deploy]
 #       Mirror `pr-validate.yml`. Path-detect changed services from the
-#       diff against `develop`, lint + unit-test each, validate the
-#       bundle, provision Lakebase feature branches for all six services,
-#       run alembic on changed services, deploy a preview, smoke-test it.
+#       committed diff against `develop`, lint + unit-test each changed
+#       service, validate the bundle, provision Lakebase feature branches
+#       for all six services, run alembic on changed services, build
+#       both frontend UIs (hc-portal + clinic-sim), deploy a preview,
+#       bundle run + wait + smoke-test all 8 apps.
 #       --no-deploy stops after lint+test+bundle-validate (fast loop).
 #
+#       Note: detect-changes reads `git diff origin/develop...HEAD`, which
+#       sees only COMMITTED changes. Working-tree edits do not count. A
+#       warning is printed if uncommitted CI-relevant paths exist; commit
+#       them first if you want per-service tests / migrations to run.
+#
 #   ci-local.sh pr-cleanup [SLUG]
-#       Mirror `pr-cleanup.yml`. Destroy the preview deploy and tear down
-#       all six per-feature Lakebase branches. SLUG defaults to the slug
-#       of the current git branch.
+#       Mirror `pr-cleanup.yml`. Destroy the preview deploy (all 8 apps)
+#       and tear down all six per-feature Lakebase branches. SLUG
+#       defaults to the slug of the current git branch.
 #
 #   ci-local.sh deploy <dev|test|prod> [--skip-tests]
-#       Mirror `deploy-{dev,test,prod}.yml`. Run all unit tests across the
-#       six services + BFF, alembic each service against the env's
-#       production branch, `bundle deploy -t <env>`, smoke-test each app.
+#       Mirror `deploy-{dev,test,prod}.yml`. Run all unit tests across
+#       the six services + hc-portal, alembic each service against the
+#       env's `production` Lakebase branch, `bundle deploy -t <env>`,
+#       bundle run + wait + smoke-test all 8 apps.
 #       --skip-tests skips the unit-test phase (e.g. when re-running a
 #       deploy after a known-good test run).
 #
@@ -69,7 +77,23 @@ err()  { printf '  ✗ %s\n'  "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 usage() {
-  sed -n '4,40p' "${BASH_SOURCE[0]}"
+  # Render the header docstring as plain text:
+  #   - line 3 is the tagline (`ci-local.sh — emulate ...`); start there
+  #     so the help opens with the script's identity, not mid-sentence.
+  #   - stop at the first non-`#` line that immediately follows the
+  #     docstring (in practice `set -euo pipefail`). The sentinel keeps
+  #     usage() and the docstring in sync — extending the docstring
+  #     just works; an accidental shift won't truncate or over-print.
+  #   - strip the leading `# ` (or bare `#`) so the rendered text reads
+  #     like prose, not a shell snippet.
+  # awk (not sed) because BSD sed on macOS handles {…} grouping with
+  # `s///` differently from GNU sed and silently drops the substitution.
+  awk '
+    NR == 1 { next }                 # skip shebang
+    NR == 2 { next }                 # skip leading `#` separator
+    /^[^#]/ { exit }                 # first non-comment line ends the docstring
+    { sub(/^# ?/, ""); print }
+  ' "${BASH_SOURCE[0]}"
   exit "${1:-2}"
 }
 
@@ -123,6 +147,57 @@ detect_changes() {
   done
   grep -qE '^frontend/hc-portal/' <<<"$files" && echo portal || true
   grep -qE '^(databricks\.yml|resources/|scripts/|\.github/workflows/)' <<<"$files" && echo infra || true
+}
+
+# ---------------------------------------------------------------------------
+# detect-changes only sees COMMITTED changes (it diffs against
+# origin/develop). That's correct for CI parity, but in local dev it
+# silently skips per-service tests + migrations whenever the developer
+# has WIP they haven't committed yet. This helper warns when uncommitted
+# changes exist in any CI-relevant path so the developer is told
+# explicitly that pr-validate won't lint/migrate/etc. that code.
+#
+# Categorizes WIP into the same buckets detect_changes emits so the
+# warning maps 1:1 onto what would otherwise have been executed.
+# Informational only — never blocks the run.
+# ---------------------------------------------------------------------------
+warn_wip_outside_diff() {
+  # `git status --porcelain` lists ALL working-tree changes — modified,
+  # staged, untracked. Path is in columns 4+. We don't care about the
+  # status bytes for this warning.
+  local porcelain
+  porcelain=$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null || true)
+  [[ -z "$porcelain" ]] && return 0
+
+  local paths
+  paths=$(awk '{ $1=""; sub(/^ /,""); print }' <<<"$porcelain")
+
+  local -a wip_services=()
+  for svc in "${SERVICES[@]}"; do
+    grep -qE "^services/$svc/" <<<"$paths" && wip_services+=("$svc")
+  done
+  local wip_portal=0 wip_clinic=0 wip_infra=0
+  grep -qE '^frontend/hc-portal/' <<<"$paths" && wip_portal=1
+  grep -qE '^frontend/clinic-sim/' <<<"$paths" && wip_clinic=1
+  grep -qE '^(databricks\.yml|resources/|scripts/|\.github/workflows/)' <<<"$paths" && wip_infra=1
+
+  # Nothing CI-relevant uncommitted? Quiet exit.
+  if (( ${#wip_services[@]} == 0 && wip_portal == 0 && wip_clinic == 0 && wip_infra == 0 )); then
+    return 0
+  fi
+
+  printf '\n┃ WARNING: uncommitted WIP in CI-relevant paths\n'
+  printf '  detect-changes diffs origin/develop...HEAD and sees COMMITTED code only.\n'
+  printf '  Working-tree changes are invisible to it. The following will be SKIPPED\n'
+  printf '  unless you commit first:\n'
+  if (( ${#wip_services[@]} > 0 )); then
+    printf '    - per-service lint+tests + alembic migrations for: %s\n' "${wip_services[*]}"
+  fi
+  (( wip_portal )) && printf '    - hc-portal lint+tests\n'
+  (( wip_clinic )) && printf '    - clinic-sim (no test suite yet; build still runs)\n'
+  (( wip_infra  )) && printf '    - infra-tagged paths (databricks.yml / resources/ / scripts/ / .github/workflows/)\n'
+  printf '  Bundle validate + build + deploy + run + smoke STILL execute against\n'
+  printf '  whatever is on disk (apx build syncs the working tree). Continuing...\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -252,7 +327,7 @@ bundle_run_apps() {
   local log_dir
   log_dir=$(mktemp -d)
   local -a keys pids
-  keys=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app)
+  keys=(patient_app provider_app appointment_app lab_app prescription_app billing_app hc_portal_app clinic_sim_app)
   pids=()
   for key in "${keys[@]}"; do
     (
@@ -287,7 +362,7 @@ bundle_run_apps() {
 wait_for_running() {
   local profile="$1" suffix="$2"
   step "wait for RUNNING (suffix='$suffix', profile=$profile)"
-  for app in patient provider appointment lab prescription billing hc-portal; do
+  for app in patient provider appointment lab prescription billing hc-portal clinic-sim; do
     local name="$app$suffix"
     local i state
     for i in $(seq 1 20); do
@@ -304,7 +379,7 @@ wait_for_running() {
       sleep 15
     done
   done
-  ok "all 7 apps RUNNING"
+  ok "all 8 apps RUNNING"
 }
 
 # ---------------------------------------------------------------------------
@@ -317,7 +392,9 @@ wait_for_running() {
 #   - assert HTTP 200 exactly (not <400),
 #   - assert body == {"ok":true} (the literal app/BFF healthz response).
 #
-# Services mount the route at /api/v1/healthz; hc-portal at /api/bff/healthz.
+# Services mount the route at /api/v1/healthz; hc-portal at /api/bff/healthz;
+# clinic-sim at /api/sim/healthz (see
+# frontend/clinic-sim/src/clinic_sim/backend/routers/simulator.py).
 # See services/<svc>/src/<svc>/app.py and
 # frontend/hc-portal/src/hc_portal/backend/routers/aggregations.py.
 # ---------------------------------------------------------------------------
@@ -363,9 +440,10 @@ smoke_apps() {
     _assert_healthz "$app$suffix" "/api/v1/healthz" || fail=1
   done
   _assert_healthz "hc-portal$suffix" "/api/bff/healthz" || fail=1
+  _assert_healthz "clinic-sim$suffix" "/api/sim/healthz" || fail=1
 
   if (( fail == 0 )); then
-    ok "all 7 apps return 200 {\"ok\":true}"
+    ok "all 8 apps return 200 {\"ok\":true}"
   else
     return 1
   fi
@@ -385,7 +463,11 @@ cmd_pr_validate() {
 
   local slug
   slug=$(current_slug)
-  log "pr-validate (slug=feat-$slug)"
+  # $slug already includes the `feat-` / `hotfix-` prefix (see
+  # sanitize-branch-slug.sh) so it goes into the banner verbatim.
+  log "pr-validate (slug=$slug)"
+
+  warn_wip_outside_diff
 
   step "detect-changes"
   local changes_file
@@ -406,7 +488,11 @@ cmd_pr_validate() {
   done <"$changes_file"
   ok "services=${changed_services[*]:-(none)} portal=$has_portal infra=$has_infra"
 
-  for svc in "${changed_services[@]}"; do
+  # `"${arr[@]+"${arr[@]}"}"` is the bash-3.2-safe empty-array expansion.
+  # Bare `"${changed_services[@]}"` triggers "unbound variable" under
+  # `set -u` when the array is empty (e.g. a PR that only touches
+  # `frontend/`), even though the array IS declared on line above.
+  for svc in "${changed_services[@]+"${changed_services[@]}"}"; do
     service_checks "$svc"
   done
   if (( has_portal )); then
@@ -435,7 +521,7 @@ cmd_pr_validate() {
     ok "  $slug ready in $svc-dev"
   done
 
-  for svc in "${changed_services[@]}"; do
+  for svc in "${changed_services[@]+"${changed_services[@]}"}"; do
     run_migrations "$svc" dev "$slug" hc-dev
   done
 
@@ -458,7 +544,7 @@ cmd_pr_validate() {
 
   smoke_apps dev "-$slug" hc-dev
 
-  log "pr-validate complete — preview at https://hc-portal-$slug.<workspace>.databricksapps.com"
+  log "pr-validate complete — preview at https://hc-portal-$slug.<workspace>.databricksapps.com (simulator: clinic-sim-$slug.<workspace>.databricksapps.com)"
 }
 
 # ===========================================================================
@@ -466,7 +552,9 @@ cmd_pr_validate() {
 # ===========================================================================
 cmd_pr_cleanup() {
   local slug="${1:-$(current_slug)}"
-  log "pr-cleanup (slug=feat-$slug)"
+  # $slug already carries the `feat-`/`hotfix-` prefix from
+  # sanitize-branch-slug.sh.
+  log "pr-cleanup (slug=$slug)"
 
   require_profile hc-dev
 
@@ -486,7 +574,7 @@ cmd_pr_cleanup() {
   for svc in "${SERVICES[@]}"; do
     "$BRANCH_DOWN" "$svc" "$slug" hc-dev || true
   done
-  ok "cleanup done for feat-$slug"
+  ok "cleanup done for $slug"
 }
 
 # ===========================================================================

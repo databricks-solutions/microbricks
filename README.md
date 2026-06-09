@@ -6,6 +6,42 @@
   <em>A solution accelerator for building microservices on Databricks.</em>
 </p>
 
+<p align="center">
+  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/deploy-dev.yml"><img alt="deploy-dev" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/deploy-dev.yml?branch=develop&label=deploy-dev&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/deploy-test.yml"><img alt="deploy-test" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/deploy-test.yml?branch=main&label=deploy-test&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/deploy-prod.yml"><img alt="deploy-prod" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/deploy-prod.yml?label=deploy-prod&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/pr-validate.yml"><img alt="pr-validate" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/pr-validate.yml?label=pr-validate&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <img alt="status" src="https://img.shields.io/badge/status-phases%201--7%20complete-success?style=flat-square">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/erinaldidb/microbricks?style=flat-square"></a>
+  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square"></a>
+  <img alt="GitFlow" src="https://img.shields.io/badge/workflow-GitFlow-orange?style=flat-square&logo=git&logoColor=white">
+</p>
+<p align="center">
+  <img alt="Databricks Apps" src="https://img.shields.io/badge/Databricks-Apps-FF3621?style=flat-square&logo=databricks&logoColor=white">
+  <img alt="Lakebase" src="https://img.shields.io/badge/Lakebase-Postgres%20Autoscale-336791?style=flat-square&logo=postgresql&logoColor=white">
+  <img alt="Asset Bundles" src="https://img.shields.io/badge/Asset%20Bundles-DAB-FF3621?style=flat-square&logo=databricks&logoColor=white">
+  <img alt="Unity Catalog OBO" src="https://img.shields.io/badge/Auth-Unity%20Catalog%20OBO-FF3621?style=flat-square&logo=databricks&logoColor=white">
+  <img alt="GitHub Actions" src="https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white">
+</p>
+<p align="center">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119-009688?style=flat-square&logo=fastapi&logoColor=white">
+  <img alt="Pydantic v2" src="https://img.shields.io/badge/Pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white">
+  <img alt="Alembic" src="https://img.shields.io/badge/Alembic-migrations-6BA539?style=flat-square">
+  <img alt="APX" src="https://img.shields.io/badge/APX-framework-FF3621?style=flat-square">
+  <img alt="uv" src="https://img.shields.io/badge/uv-package%20manager-DE5FE9?style=flat-square&logo=uv&logoColor=white">
+  <img alt="pytest" src="https://img.shields.io/badge/pytest-tested-0A9EDC?style=flat-square&logo=pytest&logoColor=white">
+</p>
+<p align="center">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black">
+  <img alt="TypeScript 5.9" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white">
+  <img alt="Vite 8" src="https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white">
+  <img alt="TanStack Router + Query" src="https://img.shields.io/badge/TanStack-Router%20%2B%20Query-FF4154?style=flat-square&logo=reactquery&logoColor=white">
+  <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white">
+  <img alt="shadcn/ui" src="https://img.shields.io/badge/shadcn%2Fui-components-000000?style=flat-square&logo=shadcnui&logoColor=white">
+  <img alt="bun" src="https://img.shields.io/badge/bun-toolchain-000000?style=flat-square&logo=bun&logoColor=white">
+</p>
+
 ---
 
 **microbricks** demonstrates how to build microservices on Databricks using **Databricks Apps** for the runtime, **Lakebase Autoscale Postgres** for per-service state, **OBO authentication** for end-to-end user identity, and **DABs + GitHub Actions** for CI/CD across dev/test/prod.

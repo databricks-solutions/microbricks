@@ -62,17 +62,31 @@ fi
 echo "Found ${#PROJECTS[@]} apx project(s) to build:"
 printf '  - %s\n' "${PROJECTS[@]}"
 
-FAIL=0
+LOG_DIR=$(mktemp -d)
+PIDS=()
+
 for proj in "${PROJECTS[@]}"; do
-  echo
-  echo "▶ Building UI for $proj"
-  if ( cd "$proj" && apx frontend build ); then
+  echo "▶ Building UI for $proj (background)"
+  (
+    cd "$proj" && apx frontend build
+  ) > "$LOG_DIR/${proj##*/}.log" 2>&1 &
+  PIDS+=("$!")
+done
+
+FAIL=0
+for i in "${!PROJECTS[@]}"; do
+  proj="${PROJECTS[$i]}"
+  pid="${PIDS[$i]}"
+  if wait "$pid"; then
     echo "  ✓ $proj"
   else
     echo "  ✗ $proj failed" >&2
+    cat "$LOG_DIR/${proj##*/}.log" >&2
     FAIL=1
   fi
 done
+
+rm -rf "$LOG_DIR"
 
 if (( FAIL != 0 )); then
   echo

@@ -1,0 +1,31 @@
+command:
+  - "uvicorn"
+  - "clinic_sim.backend.app:app"
+  - "--workers"
+  - "2"
+
+env:
+  - name: SERVICE_NAME
+    value: "clinic-sim"
+
+  # Same src-layout as hc-portal — see frontend/hc-portal/app.yml for the
+  # detailed rationale. `package = false` in pyproject.toml means uv only
+  # installs deps; adding `src` to PYTHONPATH is what lets uvicorn import
+  # `clinic_sim.backend.app:app` at runtime.
+  - name: PYTHONPATH
+    value: "src"
+
+  # Default per-flow concurrency for the simulator BFF. The orchestrator
+  # bounds the per-request fanout with this semaphore so a single 10k-patient
+  # run can't open thousands of connections to each downstream service. Bump
+  # carefully — every concurrent flow holds up to one connection per service.
+  - name: SIM_MAX_CONCURRENCY
+    value: "16"
+
+# Service URL overrides — same shape as hc-portal/app.yml. The BFF derives
+# each downstream URL from its own `DATABRICKS_APP_URL` by stripping its
+# `clinic-sim` prefix and prepending the service slug. Set these env vars
+# to point at non-default hosts (local dev, alternate workspace, etc.).
+#
+#  - name: PATIENT_SVC_URL
+#    value: "http://localhost:8001"

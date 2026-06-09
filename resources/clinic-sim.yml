@@ -1,0 +1,55 @@
+resources:
+  apps:
+    clinic_sim_app:
+      # `${var.app_name_suffix}` is empty for canonical dev/test/prod deploys
+      # (so the name is `clinic-sim` in every workspace) and `-feat-<slug>`
+      # for per-PR preview deploys (`clinic-sim-feat-<slug>`). See
+      # databricks.yml for the rationale.
+      name: clinic-sim${var.app_name_suffix}
+      description: "Animated patient-journey simulator. Drives every service end-to-end through real CRUD calls."
+      source_code_path: ../frontend/clinic-sim
+
+      # Same OBO scopes as hc-portal — the simulator is a fan-out BFF, not a
+      # data owner, and it needs `sql` + `postgres` so the user's token can
+      # be forwarded to each service intact.
+      user_api_scopes:
+        - "sql"
+        - "postgres"
+
+      # Declaring each backend app as a CAN_USE dependency does two things:
+      #   1. Records the deploy ordering (services first, then sim).
+      #   2. Grants the sim's service principal CAN_USE on each backend
+      #      app, the platform ACL Apps uses to gate cross-app traffic.
+      # Same pattern as hc-portal — the simulator BFF talks to the exact
+      # same set of backend services.
+      resources:
+        - name: patient_app
+          description: "Patient service backend."
+          app:
+            name: ${resources.apps.patient_app.name}
+            permission: CAN_USE
+        - name: provider_app
+          description: "Provider service backend."
+          app:
+            name: ${resources.apps.provider_app.name}
+            permission: CAN_USE
+        - name: appointment_app
+          description: "Appointment service backend."
+          app:
+            name: ${resources.apps.appointment_app.name}
+            permission: CAN_USE
+        - name: lab_app
+          description: "Lab service backend."
+          app:
+            name: ${resources.apps.lab_app.name}
+            permission: CAN_USE
+        - name: prescription_app
+          description: "Prescription service backend."
+          app:
+            name: ${resources.apps.prescription_app.name}
+            permission: CAN_USE
+        - name: billing_app
+          description: "Billing service backend."
+          app:
+            name: ${resources.apps.billing_app.name}
+            permission: CAN_USE
