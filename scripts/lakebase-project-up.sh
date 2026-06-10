@@ -50,6 +50,22 @@ PRODUCTION_BRANCH_PATH="$PROJECT_PATH/branches/production"
 
 >&2 echo "→ Ensuring Lakebase project $PROJECT_PATH (profile=$PROFILE)"
 
+ensure_users_group() {
+  # Create the `users` group role used by all services (via LAKEBASE_AUTH_GROUP
+  # env var) as the Postgres connection user. Assigned DATABRICKS_SUPERUSER
+  # so the group has full access to all schemas/tables within the project.
+  # Idempotent: create-role returns an error if the role already exists.
+  if databricks postgres get-role "$PRODUCTION_BRANCH_PATH/roles/users" -p "$PROFILE" >/dev/null 2>&1; then
+    >&2 echo "  'users' group role already exists"
+    return 0
+  fi
+  >&2 echo "  creating 'users' group role with DATABRICKS_SUPERUSER"
+  databricks postgres create-role "$PRODUCTION_BRANCH_PATH" \
+    --role-id users \
+    --json '{"spec":{"identity_type":"GROUP","postgres_role":"users","auth_method":"LAKEBASE_OAUTH_V1","membership_roles":["DATABRICKS_SUPERUSER"]}}' \
+    -p "$PROFILE" >/dev/null
+}
+
 ensure_production_branch_protected() {
   # The `production` branch is auto-created with `is_protected=false`. We
   # always set it to true here so:
@@ -76,6 +92,7 @@ ensure_production_branch_protected() {
 if databricks postgres get-project "$PROJECT_PATH" -p "$PROFILE" >/dev/null 2>&1; then
   >&2 echo "  project $PROJECT_ID already exists, reusing"
   ensure_production_branch_protected
+  ensure_users_group
   exit 0
 fi
 
@@ -102,3 +119,4 @@ EOF
 >&2 echo "  created $PROJECT_ID"
 
 ensure_production_branch_protected
+ensure_users_group
