@@ -8,6 +8,9 @@ resources:
       name: clinic-sim${var.app_name_suffix}
       description: "Animated patient-journey simulator. Drives every service end-to-end through real CRUD calls."
       source_code_path: ../frontend/clinic-sim
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # Same OBO scopes as hc-portal — the simulator is a fan-out BFF, not a
       # data owner, and it needs `sql` + `postgres` so the user's token can
