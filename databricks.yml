@@ -1,5 +1,6 @@
 bundle:
   name: microbricks
+  engine: direct
 
 include:
   - resources/*.yml
