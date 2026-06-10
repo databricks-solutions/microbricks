@@ -335,55 +335,90 @@ jobs:
       - name: Build all frontend UIs
         run: ./scripts/build-frontends.sh
 
-      - name: Deploy preview bundle
+      - name: Compute changed bundle keys
+        id: bundle-keys
         env:
-          SLUG: ${{ needs.detect-changes.outputs.slug }}
-        run: |
-          databricks bundle deploy -t dev \
-            --var "app_name_suffix=-$SLUG" \
-            --var "lakebase_branch=$SLUG"
-
-      - name: bundle run preview apps (submit deployment per app, in parallel)
-        env:
-          SLUG: ${{ needs.detect-changes.outputs.slug }}
-          ALL_BUNDLE_KEYS: ${{ needs.detect-changes.outputs.all_bundle_keys }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
+          CHANGED_FRONTENDS: ${{ needs.detect-changes.outputs.changed_frontends }}
+          SERVICES_JSON: ${{ needs.detect-changes.outputs.services_json }}
+          FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
         run: |
           set -euo pipefail
-          LOG_DIR=$(mktemp -d)
-          mapfile -t KEYS < <(echo "$ALL_BUNDLE_KEYS" | jq -r '.[]')
-          PIDS=()
-          for KEY in "${KEYS[@]}"; do
-            (
-              databricks bundle run -t dev "$KEY" \
-                --var "app_name_suffix=-$SLUG" \
-                --var "lakebase_branch=$SLUG"
-            ) > "$LOG_DIR/$KEY.log" 2>&1 &
-            PID=$!
-            PIDS+=("$PID")
-            echo "→ kicked $KEY (pid=$PID, slug=$SLUG)"
+          KEYS=$(python3 -c '
+          import json, os
+          changed_svcs = json.loads(os.environ["CHANGED_SERVICES"])
+          changed_fes = json.loads(os.environ["CHANGED_FRONTENDS"])
+          all_svcs = json.loads(os.environ["SERVICES_JSON"])
+          all_fes = json.loads(os.environ["FRONTENDS_JSON"])
+          changed_dirs = set(changed_svcs + changed_fes)
+          keys = [p["bundle_key"] for p in all_svcs + all_fes if p["dir"] in changed_dirs]
+          print(json.dumps(keys))
+          ')
+          echo "keys=$KEYS" >> "$GITHUB_OUTPUT"
+          echo "Changed bundle keys: $KEYS"
+
+      - name: Deploy changed apps
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+          CHANGED_KEYS: ${{ steps.bundle-keys.outputs.keys }}
+        run: |
+          set -euo pipefail
+          SELECT_ARGS=""
+          for KEY in $(echo "$CHANGED_KEYS" | jq -r '.[]'); do
+            SELECT_ARGS="$SELECT_ARGS --select apps.$KEY"
           done
+          echo "→ Deploying:$SELECT_ARGS"
+          databricks bundle deploy -t dev \
+            --var "app_name_suffix=-$SLUG" \
+            --var "lakebase_branch=$SLUG" \
+            $SELECT_ARGS
+
+      - name: Run changed apps (one at a time)
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+          CHANGED_KEYS: ${{ steps.bundle-keys.outputs.keys }}
+        run: |
+          set -euo pipefail
           FAIL=0
-          for i in "${!KEYS[@]}"; do
-            KEY="${KEYS[$i]}"
-            if wait "${PIDS[$i]}"; then
-              echo "✓ $KEY"
-              tail -3 "$LOG_DIR/$KEY.log" | sed 's/^/    /'
+          for KEY in $(echo "$CHANGED_KEYS" | jq -r '.[]'); do
+            echo "→ Running $KEY..."
+            if databricks bundle run -t dev "apps.$KEY" \
+              --var "app_name_suffix=-$SLUG" \
+              --var "lakebase_branch=$SLUG"; then
+              echo "  ✓ $KEY"
             else
-              echo "::error::$KEY failed; full log:"
-              cat "$LOG_DIR/$KEY.log"
+              echo "::error::$KEY run failed"
               FAIL=1
             fi
           done
-          rm -rf "$LOG_DIR"
           (( FAIL == 0 )) || exit 1
+
+      - name: Compute changed app names
+        id: changed-apps
+        env:
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
+          CHANGED_FRONTENDS: ${{ needs.detect-changes.outputs.changed_frontends }}
+          SERVICES_JSON: ${{ needs.detect-changes.outputs.services_json }}
+          FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
+        run: |
+          set -euo pipefail
+          NAMES=$(python3 -c '
+          import json, os
+          changed_dirs = set(json.loads(os.environ["CHANGED_SERVICES"]) + json.loads(os.environ["CHANGED_FRONTENDS"]))
+          all_projects = json.loads(os.environ["SERVICES_JSON"]) + json.loads(os.environ["FRONTENDS_JSON"])
+          names = [p["app_name"] for p in all_projects if p["dir"] in changed_dirs]
+          print(json.dumps(names))
+          ')
+          echo "names=$NAMES" >> "$GITHUB_OUTPUT"
+          echo "Changed app names: $NAMES"
 
       - name: Wait for RUNNING state
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-          ALL_APP_NAMES: ${{ needs.detect-changes.outputs.all_app_names }}
+          CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
         run: |
           set -euo pipefail
-          for app in $(echo "$ALL_APP_NAMES" | jq -r '.[]'); do
+          for app in $(echo "$CHANGED_APP_NAMES" | jq -r '.[]'); do
             for i in $(seq 1 20); do
               STATE=$(databricks apps get "$app-$SLUG" -p hc-dev -o json \
                 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("compute_status",{}).get("state",""))')
@@ -402,6 +437,8 @@ jobs:
       - name: Smoke-test preview (honest /healthz check)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
+          CHANGED_FRONTENDS: ${{ needs.detect-changes.outputs.changed_frontends }}
           SERVICES_JSON: ${{ needs.detect-changes.outputs.services_json }}
           FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
         run: |
@@ -438,13 +475,18 @@ jobs:
             fi
             echo "✓ $app $path -> 200 $body"
           }
+          CHANGED_DIRS=$(python3 -c "import json,os; print(' '.join(json.loads(os.environ['CHANGED_SERVICES']) + json.loads(os.environ['CHANGED_FRONTENDS'])))")
           FAIL=0
           for row in $(echo "$SERVICES_JSON" | jq -c '.[]'); do
+            dir=$(echo "$row" | jq -r '.dir')
+            echo "$CHANGED_DIRS" | grep -qw "$dir" || continue
             app=$(echo "$row" | jq -r '.app_name')
             healthz=$(echo "$row" | jq -r '.healthz')
             assert_healthz "$app-$SLUG" "$healthz" || FAIL=1
           done
           for row in $(echo "$FRONTENDS_JSON" | jq -c '.[]'); do
+            dir=$(echo "$row" | jq -r '.dir')
+            echo "$CHANGED_DIRS" | grep -qw "$dir" || continue
             app=$(echo "$row" | jq -r '.app_name')
             healthz=$(echo "$row" | jq -r '.healthz')
             assert_healthz "$app-$SLUG" "$healthz" || FAIL=1
@@ -455,17 +497,17 @@ jobs:
         id: urls
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
-          ALL_APP_NAMES: ${{ needs.detect-changes.outputs.all_app_names }}
+          CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
           FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, subprocess
           slug = os.environ["SLUG"]
-          all_apps = json.loads(os.environ["ALL_APP_NAMES"])
+          changed_apps = json.loads(os.environ["CHANGED_APP_NAMES"])
           frontends = json.loads(os.environ["FRONTENDS_JSON"])
           urls = {}
-          for app_name in all_apps:
+          for app_name in changed_apps:
               app = f"{app_name}-{slug}"
               out = subprocess.check_output(
                   ["databricks","apps","get",app,"-p","hc-dev","-o","json"],
@@ -481,21 +523,21 @@ jobs:
         uses: actions/github-script@v7
         env:
           URLS_JSON: ${{ steps.urls.outputs.map }}
-          ALL_APP_NAMES: ${{ needs.detect-changes.outputs.all_app_names }}
+          CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
         with:
           script: |
             const slug = '${{ needs.detect-changes.outputs.slug }}';
             const urls = JSON.parse(process.env.URLS_JSON || '{}');
-            const allApps = JSON.parse(process.env.ALL_APP_NAMES || '[]');
+            const changedApps = JSON.parse(process.env.CHANGED_APP_NAMES || '[]');
             const body = [
               '### Preview deploy ready',
               '',
               `Slug: \`${slug}\``,
-              `Changed services: \`${{ steps.changed.outputs.services }}\``,
+              `Changed apps: \`${changedApps.join(', ')}\``,
               '',
               '| App | URL |',
               '|---|---|',
-              ...allApps.map(s => `| \`${s}-${slug}\` | ${urls[s] || 'N/A'} |`),
+              ...changedApps.map(s => `| \`${s}-${slug}\` | ${urls[s] || 'N/A'} |`),
               '',
               'Login with your Databricks user; the BFF forwards your OBO token to each backend.',
               '',
