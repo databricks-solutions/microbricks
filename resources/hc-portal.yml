@@ -4,6 +4,9 @@ resources:
       name: hc-portal${var.app_name_suffix}
       description: "Healthcare clinician portal — frontend + BFF."
       source_code_path: ../frontend/hc-portal
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # No `config.env` block by default: the BFF composes every downstream
       # URL at runtime from its own platform-injected `DATABRICKS_APP_URL`.

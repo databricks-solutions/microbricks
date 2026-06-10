@@ -50,6 +50,8 @@ class OAuthConnection(psycopg.AsyncConnection):
         return await super().connect(conninfo, **kwargs)
 
 
+_AUTH_GROUP = os.environ.get("LAKEBASE_AUTH_GROUP", "users")
+
 _POOL_TTL = 2700  # seconds — same as max_lifetime
 _POOL_MAX = 256   # eviction cap, prevents unbounded growth from many distinct tokens
 _pools: dict[str, tuple[AsyncConnectionPool[OAuthConnection], float]] = {}
@@ -118,8 +120,9 @@ async def get_pool(
         dbname = os.environ.get("PGDATABASE", "databricks_postgres")
         sslmode = os.environ.get("PGSSLMODE", "require")
 
+        pg_user = _AUTH_GROUP if _AUTH_GROUP else user_email
         pool = AsyncConnectionPool(
-            conninfo=f"host={host} port={port} dbname={dbname} user={user_email} sslmode={sslmode}",
+            conninfo=f"host={host} port={port} dbname={dbname} user={pg_user} sslmode={sslmode}",
             connection_class=OAuthConnection,
             max_lifetime=_POOL_TTL,
             min_size=0,

@@ -281,17 +281,10 @@ jobs:
       - name: Compute changed-services list
         id: changed
         env:
-          ALL_CHANGES: ${{ needs.detect-changes.outputs.service_changes }}
-          SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
         run: |
-          OUT=()
-          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
-            if echo "$ALL_CHANGES" | grep -q "\"$svc\""; then
-              OUT+=("$svc")
-            fi
-          done
-          echo "services=${OUT[*]}" >> "$GITHUB_OUTPUT"
-          echo "Changed services: ${OUT[*]}"
+          echo "services=$CHANGED_SERVICES" >> "$GITHUB_OUTPUT"
+          echo "Changed services: $CHANGED_SERVICES"
 
       - name: Ensure Lakebase projects exist (idempotent)
         env:
@@ -318,9 +311,10 @@ jobs:
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
+          CHANGED_SERVICES: ${{ steps.changed.outputs.services }}
         run: |
           set -euo pipefail
-          for svc in ${{ steps.changed.outputs.services }}; do
+          for svc in $(echo "$CHANGED_SERVICES" | jq -r '.[]'); do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
             ENDPOINT="projects/$svc/branches/$SLUG/endpoints/primary"

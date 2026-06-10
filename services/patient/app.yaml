@@ -35,3 +35,6 @@ env:
   # in resources/patient.yml) to its endpoint path.
   - name: ENDPOINT_NAME
     valueFrom: "patient_db"
+
+  - name: LAKEBASE_AUTH_GROUP
+    value: "users"
