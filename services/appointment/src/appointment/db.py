@@ -71,6 +71,7 @@ async def _resolve_host(endpoint_path: str, user_token: str) -> str:
         return cached[0]
     ws = WorkspaceClient(token=user_token, auth_type="pat")
     ep = ws.postgres.get_endpoint(endpoint_path)
+    assert ep.status is not None and ep.status.hosts is not None and ep.status.hosts.host is not None
     host = ep.status.hosts.host
     _endpoint_host_cache[endpoint_path] = (host, now + _ENDPOINT_HOST_TTL)
     return host
