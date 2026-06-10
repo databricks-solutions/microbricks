@@ -32,8 +32,8 @@ class PrescriptionCreatePayload(BaseModel):
 
 
 class PrescriptionClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="prescription")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="prescription", branch=branch)
 
     async def create(self, payload: PrescriptionCreatePayload) -> Prescription:
         r = await self._client.post(

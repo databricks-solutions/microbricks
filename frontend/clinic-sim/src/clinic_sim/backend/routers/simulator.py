@@ -15,7 +15,7 @@ from typing import Annotated, AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from ...auth import user_token
+from ...auth import branch_name, user_token
 from ..simulator import run_simulation
 
 router = APIRouter(prefix="/sim", tags=["simulator"])
@@ -31,6 +31,7 @@ def _default_max_concurrency() -> int:
 @router.get("/stream", operation_id="streamSimulation")
 async def stream_simulation(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     count: int = Query(1, ge=1, le=10_000),
     register_probability: float = Query(0.3, ge=0.0, le=1.0),
     lab_probability: float = Query(0.4, ge=0.0, le=1.0),
@@ -58,6 +59,7 @@ async def stream_simulation(
             async for evt in run_simulation(
                 token,
                 count=count,
+                branch=branch,
                 register_probability=register_probability,
                 lab_probability=lab_probability,
                 rx_probability=rx_probability,

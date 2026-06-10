@@ -82,5 +82,6 @@ docs/diagrams/*.tmp.drawio
 .claude/cache/
 
 # --- Lock files --- TODO Remove this if not in databricks vpn
-.lock
+uv.lock
+bun.lock
 .apx/

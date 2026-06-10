@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ..auth import user_email, user_token
+from ..auth import branch_name, user_email, user_token
 from ..db import get_pool
 
 router = APIRouter(tags=["patients"])
@@ -60,6 +60,7 @@ class PatientPage(BaseModel):
 async def list_patients(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     ids: Annotated[list[UUID] | None, Query()] = None,
     limit: int = 50,
@@ -85,7 +86,7 @@ async def list_patients(
         "limit": safe_limit,
         "offset": safe_offset,
     }
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -139,10 +140,11 @@ async def list_patients(
 async def count_patients(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> CountOut:
     """Server-side row count so callers (BFF dashboard) don't have to
     pull the full list to get an accurate total."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT COUNT(*) FROM patient WHERE deleted_at IS NULL")
         row = await cur.fetchone()
@@ -159,8 +161,9 @@ async def get_patient(
     patient_id: UUID,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ):
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, mrn, given_name, family_name, birth_date, sex_at_birth "
@@ -190,6 +193,7 @@ async def create_patient(
     payload: PatientCreate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> PatientOut:
     """Register a new patient.
 
@@ -198,7 +202,7 @@ async def create_patient(
     optional; on omit, the DB-side gen_random_uuid() is mapped through a
     short, sortable string the human admin can read.
     """
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """

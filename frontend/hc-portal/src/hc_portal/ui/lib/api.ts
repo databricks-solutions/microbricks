@@ -173,6 +173,7 @@ export interface GetAlertsParams {
     q?: string | null;
     severity?: string | null;
     type?: string | null;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
@@ -183,6 +184,7 @@ export const getAlerts = async (params?: GetAlertsParams, options?: RequestInit)
     if (params?.q != null) searchParams.set("q", String(params?.q));
     if (params?.severity != null) searchParams.set("severity", String(params?.severity));
     if (params?.type != null) searchParams.set("type", String(params?.type));
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
     const queryString = searchParams.toString();
     const url = queryString ? `/api/bff/alerts?${queryString}` : "/api/bff/alerts";
     const res = await fetch(url, {
@@ -255,6 +257,7 @@ export interface ListAppointmentsBffParams {
     patient_q?: string | null;
     limit?: number;
     offset?: number;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
@@ -270,6 +273,7 @@ export const listAppointmentsBff = async (params?: ListAppointmentsBffParams, op
     if (params?.patient_q != null) searchParams.set("patient_q", String(params?.patient_q));
     if (params?.limit != null) searchParams.set("limit", String(params?.limit));
     if (params?.offset != null) searchParams.set("offset", String(params?.offset));
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
     const queryString = searchParams.toString();
     const url = queryString ? `/api/bff/appointments?${queryString}` : "/api/bff/appointments";
     const res = await fetch(url, {
@@ -339,6 +343,7 @@ export interface GetBillingOverviewParams {
     patient_q?: string | null;
     limit?: number;
     offset?: number;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
@@ -351,6 +356,7 @@ export const getBillingOverview = async (params?: GetBillingOverviewParams, opti
     if (params?.patient_q != null) searchParams.set("patient_q", String(params?.patient_q));
     if (params?.limit != null) searchParams.set("limit", String(params?.limit));
     if (params?.offset != null) searchParams.set("offset", String(params?.offset));
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
     const queryString = searchParams.toString();
     const url = queryString ? `/api/bff/billing-overview?${queryString}` : "/api/bff/billing-overview";
     const res = await fetch(url, {
@@ -415,13 +421,18 @@ export function useGetBillingOverviewSuspense<TData = {
     });
 }
 export interface GetDashboardStatsParams {
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
 export const getDashboardStats = async (params?: GetDashboardStatsParams, options?: RequestInit): Promise<{
     data: DashboardStatsOut;
 }> =>{
-    const res = await fetch("/api/bff/dashboard-stats", {
+    const searchParams = new URLSearchParams();
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/bff/dashboard-stats?${queryString}` : "/api/bff/dashboard-stats";
+    const res = await fetch(url, {
         ...options,
         method: "GET",
         headers: {
@@ -540,6 +551,7 @@ export interface ListLabsBffParams {
     patient_q?: string | null;
     limit?: number;
     offset?: number;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
@@ -552,6 +564,7 @@ export const listLabsBff = async (params?: ListLabsBffParams, options?: RequestI
     if (params?.patient_q != null) searchParams.set("patient_q", String(params?.patient_q));
     if (params?.limit != null) searchParams.set("limit", String(params?.limit));
     if (params?.offset != null) searchParams.set("offset", String(params?.offset));
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
     const queryString = searchParams.toString();
     const url = queryString ? `/api/bff/labs?${queryString}` : "/api/bff/labs";
     const res = await fetch(url, {
@@ -617,13 +630,18 @@ export function useListLabsBffSuspense<TData = {
 }
 export interface GetPatientSummaryParams {
     patient_id: string;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
 export const getPatientSummary = async (params: GetPatientSummaryParams, options?: RequestInit): Promise<{
     data: PatientSummaryOut;
 }> =>{
-    const res = await fetch(`/api/bff/patient-summary/${params.patient_id}`, {
+    const searchParams = new URLSearchParams();
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/bff/patient-summary/${params.patient_id}?${queryString}` : `/api/bff/patient-summary/${params.patient_id}`;
+    const res = await fetch(url, {
         ...options,
         method: "GET",
         headers: {
@@ -686,13 +704,18 @@ export function useGetPatientSummarySuspense<TData = {
 }
 export interface GetPatientTimelineParams {
     patient_id: string;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
 export const getPatientTimeline = async (params: GetPatientTimelineParams, options?: RequestInit): Promise<{
     data: TimelineEvent[];
 }> =>{
-    const res = await fetch(`/api/bff/patient-timeline/${params.patient_id}`, {
+    const searchParams = new URLSearchParams();
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/bff/patient-timeline/${params.patient_id}?${queryString}` : `/api/bff/patient-timeline/${params.patient_id}`;
+    const res = await fetch(url, {
         ...options,
         method: "GET",
         headers: {
@@ -757,6 +780,7 @@ export interface ListPatientsBffParams {
     q?: string | null;
     limit?: number;
     offset?: number;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
@@ -767,6 +791,7 @@ export const listPatientsBff = async (params?: ListPatientsBffParams, options?: 
     if (params?.q != null) searchParams.set("q", String(params?.q));
     if (params?.limit != null) searchParams.set("limit", String(params?.limit));
     if (params?.offset != null) searchParams.set("offset", String(params?.offset));
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
     const queryString = searchParams.toString();
     const url = queryString ? `/api/bff/patients?${queryString}` : "/api/bff/patients";
     const res = await fetch(url, {
@@ -835,6 +860,7 @@ export interface ListProvidersBffParams {
     is_active?: boolean | null;
     limit?: number;
     offset?: number;
+    branch_name?: string | null;
     "X-Forwarded-Access-Token"?: string | null;
     authorization?: string | null;
 }
@@ -846,6 +872,7 @@ export const listProvidersBff = async (params?: ListProvidersBffParams, options?
     if (params?.is_active != null) searchParams.set("is_active", String(params?.is_active));
     if (params?.limit != null) searchParams.set("limit", String(params?.limit));
     if (params?.offset != null) searchParams.set("offset", String(params?.offset));
+    if (params?.branch_name != null) searchParams.set("branch_name", String(params?.branch_name));
     const queryString = searchParams.toString();
     const url = queryString ? `/api/bff/providers?${queryString}` : "/api/bff/providers";
     const res = await fetch(url, {

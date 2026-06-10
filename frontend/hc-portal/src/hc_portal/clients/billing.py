@@ -21,8 +21,8 @@ class Invoice(BaseModel):
 
 
 class BillingClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="billing")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="billing", branch=branch)
 
     async def get_invoice(self, invoice_id: UUID) -> Invoice:
         r = await self._client.get(f"/api/v1/invoices/{invoice_id}")

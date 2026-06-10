@@ -23,8 +23,8 @@ class Prescription(BaseModel):
 
 
 class PrescriptionClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="prescription")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="prescription", branch=branch)
 
     async def get(self, prescription_id: UUID) -> Prescription:
         r = await self._client.get(f"/api/v1/prescriptions/{prescription_id}")

@@ -30,8 +30,8 @@ class AppointmentCreatePayload(BaseModel):
 
 
 class AppointmentClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="appointment")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="appointment", branch=branch)
 
     async def create(self, payload: AppointmentCreatePayload) -> Appointment:
         r = await self._client.post(

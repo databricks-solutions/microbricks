@@ -22,8 +22,8 @@ class LabOrder(BaseModel):
 
 
 class LabClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="lab")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="lab", branch=branch)
 
     async def get_order(self, lab_order_id: UUID) -> LabOrder:
         r = await self._client.get(f"/api/v1/lab-orders/{lab_order_id}")

@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ..auth import user_email, user_token
+from ..auth import branch_name, user_email, user_token
 from ..db import get_pool
 
 router = APIRouter(tags=["providers"])
@@ -46,6 +46,7 @@ class ProviderPage(BaseModel):
 async def list_providers(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     is_active: bool | None = None,
     ids: Annotated[list[UUID] | None, Query()] = None,
@@ -71,7 +72,7 @@ async def list_providers(
         "limit": safe_limit,
         "offset": safe_offset,
     }
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -134,10 +135,11 @@ async def list_providers(
 async def count_providers(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> CountOut:
     """Server-side row count so callers (BFF dashboard) don't have to
     pull the full list to get an accurate total."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT COUNT(*) FROM provider WHERE deleted_at IS NULL")
         row = await cur.fetchone()
@@ -154,8 +156,9 @@ async def get_provider(
     provider_id: UUID,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ):
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, npi, given_name, family_name, credential_suffix, email, "
