@@ -70,7 +70,7 @@ jobs:
       - name: Compute branch slug
         id: slug
         run: |
-          SLUG=$(./scripts/sanitize-branch-slug.sh "${{ github.head_ref }}")
+          SLUG="pr-${{ github.event.pull_request.number }}"
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
           echo "Computed slug: $SLUG"
 
@@ -386,7 +386,7 @@ jobs:
           for app in $(echo "$ALL_APP_NAMES" | jq -r '.[]'); do
             for i in $(seq 1 20); do
               STATE=$(databricks apps get "$app-$SLUG" -p hc-dev -o json \
-                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("compute_status",{}).get("state",""))')
               echo "  $app-$SLUG attempt $i/20: state=$STATE"
               if [[ "$STATE" == "RUNNING" ]]; then
                 break
@@ -518,3 +518,21 @@ jobs:
                 issue_number: context.payload.pull_request.number, body
               });
             }
+
+      - name: Teardown on failure (destroy bundle + Lakebase branches)
+        if: failure()
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+          SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
+        run: |
+          set -uo pipefail
+          echo "::warning::Pipeline failed — tearing down preview resources for $SLUG"
+          echo "→ Destroying bundle..."
+          databricks bundle destroy -t dev --auto-approve \
+            --var "app_name_suffix=-$SLUG" \
+            --var "lakebase_branch=$SLUG" || echo "  bundle destroy failed (may be partial)"
+          echo "→ Removing Lakebase branches..."
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
+            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" hc-dev || echo "  $svc branch-down failed (may not exist)"
+          done
+          echo "Teardown complete."

@@ -7,7 +7,7 @@ name: nightly-orphan-cleanup
 #
 # Algorithm:
 #   1. List every Lakebase branch under each `<svc>` project (in the dev
-#      workspace) that starts with `feat-` or `hotfix-`.
+#      workspace) that starts with `pr-`.
 #   2. List every open PR + every recently-closed-but-unprocessed PR.
 #      Compute the expected slug for each.
 #   3. Anything in (1) whose slug is NOT in (2) is orphaned -> delete via
@@ -91,14 +91,13 @@ jobs:
           set -euo pipefail
           ALLOW=()
           for state in open merged closed; do
-            while IFS= read -r ref; do
-              [[ -z "$ref" ]] && continue
-              SLUG=$(./scripts/sanitize-branch-slug.sh "$ref")
-              ALLOW+=("feat-$SLUG" "hotfix-$SLUG")
+            while IFS=$'\t' read -r num ref; do
+              [[ -z "$num" ]] && continue
+              ALLOW+=("pr-$num")
             done < <(gh pr list \
               --state "$state" \
               --search "updated:>=$(date -u -d '24 hours ago' +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)" \
-              --json headRefName --jq '.[].headRefName' 2>/dev/null || true)
+              --json number,headRefName --jq '.[] | "\(.number)\t\(.headRefName)"' 2>/dev/null || true)
           done
           # Dedupe + emit one slug per line into a file the next step can grep.
           printf '%s\n' "${ALLOW[@]}" | sort -u > .allowlist
@@ -113,7 +112,7 @@ jobs:
             echo "→ Scanning projects/$svc"
             BRANCHES=$(databricks postgres list-branches "projects/$svc" -p hc-dev -o json 2>/dev/null \
               | python3 -c 'import json,sys; [print(b["name"]) for b in json.load(sys.stdin)]' \
-              | grep -E '^(feat|hotfix)-' || true)
+              | grep -E '^pr-' || true)
             for branch in $BRANCHES; do
               if grep -qx "$branch" .allowlist; then
                 echo "  keep $branch (PR still tracked)"

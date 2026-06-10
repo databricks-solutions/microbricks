@@ -53,7 +53,7 @@ jobs:
       - name: Compute branch slug
         id: slug
         run: |
-          SLUG=$(./scripts/sanitize-branch-slug.sh "${{ github.head_ref }}")
+          SLUG="pr-${{ github.event.pull_request.number }}"
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
 
       - name: Install Databricks CLI

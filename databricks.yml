@@ -29,7 +29,7 @@ variables:
   # Suffix appended to every app name. Empty by default, so the dev/test/prod
   # deploys produce bare names like `patient` / `hc-portal` (each env lives
   # in its own workspace, so the namespaces don't collide). The PR-preview
-  # workflow overrides it to `-feat-<slug>`, yielding `patient-feat-<slug>`
+  # workflow overrides it to `-pr-<number>`, yielding `patient-pr-21`
   # alongside the canonical `patient` in the dev workspace. The BFF's runtime
   # URL resolution (`frontend/hc-portal/src/hc_portal/clients/_base.py`)
   # strips its own `hc-portal` prefix off the platform-injected
@@ -37,24 +37,23 @@ variables:
   # suffix shape, downstream URLs resolve correctly with no cross-app DAB
   # wiring.
   app_name_suffix:
-    description: "Optional suffix appended to every app name. Empty for stable dev/test/prod deploys; '-feat-<slug>' for per-PR previews."
+    description: "Optional suffix appended to every app name. Empty for stable dev/test/prod deploys; '-pr-<number>' for per-PR previews."
     default: ""
 
   # The Lakebase branch each app's postgres resource attaches to. Defaults to
   # the long-lived `production` branch (the only valid choice for `test` and
-  # `prod` targets). For dev, override with the current git slug so each
-  # feature branch deploys against its own copy-on-write Lakebase branch:
+  # `prod` targets). For dev, override with the PR slug so each PR deploys
+  # against its own copy-on-write Lakebase branch:
   #
-  #   SLUG=$(./scripts/sanitize-branch-slug.sh "$(git branch --show-current)")
   #   databricks bundle deploy -t dev \
-  #     --var "lakebase_branch=feat-$SLUG" \
-  #     --var "app_name_suffix=-feat-$SLUG"
+  #     --var "lakebase_branch=pr-21" \
+  #     --var "app_name_suffix=-pr-21"
   #
   # The branch must already exist (create it with the workflow in
   # .claude/skills/hc-lakebase-branching/SKILL.md or scripts/lakebase-branch-up.sh
   # before deploying).
   lakebase_branch:
-    description: "Lakebase branch every <svc>_db postgres resource binds to. 'production' for test/prod; 'feat-<slug>' for per-feature-branch dev deploys."
+    description: "Lakebase branch every <svc>_db postgres resource binds to. 'production' for test/prod; 'pr-<number>' for per-PR dev deploys."
     default: "production"
 
 targets:
@@ -63,9 +62,9 @@ targets:
   #      Produces apps like `patient` / `hc-portal` bound to the long-lived
   #      `production` Lakebase branch (project `patient`, branch `production`).
   #   2. Per-PR preview deploys, where pr-validate.yml passes
-  #      `--var app_name_suffix=-feat-<slug> --var lakebase_branch=feat-<slug>`.
-  #      Produces apps like `patient-feat-<slug>` against the project's
-  #      `feat-<slug>` Lakebase branch. Each preview lives at its own
+  #      `--var app_name_suffix=-pr-<number> --var lakebase_branch=pr-<number>`.
+  #      Produces apps like `patient-pr-21` against the project's
+  #      `pr-21` Lakebase branch. Each preview lives at its own
   #      root_path (so concurrent PRs don't stomp each other's bundle state)
   #      and its own Lakebase branch.
   dev:
@@ -75,7 +74,7 @@ targets:
       profile: hc-dev
       # `mode: development` requires `${workspace.current_user.userName}` in
       # root_path for per-user isolation. Then `${var.app_name_suffix}`
-      # ("" for the trunk-dev deploy on `develop` push, "-feat-<slug>" for
+      # ("" for the trunk-dev deploy on `develop` push, "-pr-<number>" for
       # PR previews) further distinguishes concurrent deploys made by the
       # same identity (e.g. the CI service principal running multiple PRs)
       # so `bundle deploy`/`bundle destroy` are isolated per PR.
