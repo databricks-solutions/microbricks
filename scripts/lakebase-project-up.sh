@@ -54,16 +54,25 @@ ensure_users_group() {
   # Create the `users` group role used by all services (via LAKEBASE_AUTH_GROUP
   # env var) as the Postgres connection user. Assigned DATABRICKS_SUPERUSER
   # so the group has full access to all schemas/tables within the project.
-  # Idempotent: create-role returns an error if the role already exists.
+  # Idempotent: tolerate "role with that name already exists" from create-role.
   if databricks postgres get-role "$PRODUCTION_BRANCH_PATH/roles/users" -p "$PROFILE" >/dev/null 2>&1; then
     >&2 echo "  'users' group role already exists"
     return 0
   fi
   >&2 echo "  creating 'users' group role with DATABRICKS_SUPERUSER"
-  databricks postgres create-role "$PRODUCTION_BRANCH_PATH" \
+  local output
+  if output=$(databricks postgres create-role "$PRODUCTION_BRANCH_PATH" \
     --role-id users \
     --json '{"spec":{"identity_type":"GROUP","postgres_role":"users","auth_method":"LAKEBASE_OAUTH_V1","membership_roles":["DATABRICKS_SUPERUSER"]}}' \
-    -p "$PROFILE" >/dev/null
+    -p "$PROFILE" 2>&1); then
+    return 0
+  fi
+  if echo "$output" | grep -qi "already exists"; then
+    >&2 echo "  'users' group role already exists (confirmed via create)"
+    return 0
+  fi
+  >&2 echo "  ERROR: $output"
+  return 1
 }
 
 ensure_production_branch_protected() {
