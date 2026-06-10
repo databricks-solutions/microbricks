@@ -98,3 +98,24 @@ targets:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: "hc_prod"
+
+  # Ephemeral E2E verification targets. Used by deploy-test / deploy-prod
+  # Phase 1 to validate migrations + apps against isolated Lakebase branches
+  # before committing to the permanent deploy. root_path includes
+  # ${var.app_name_suffix} so the ephemeral bundle state lives at a separate
+  # path — `bundle destroy` removes ONLY the ephemeral apps.
+  e2e-test:
+    mode: production
+    workspace:
+      profile: hc-test
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/e2e-test${var.app_name_suffix}
+    variables:
+      catalog: "hc_test"
+
+  e2e-prod:
+    mode: production
+    workspace:
+      profile: hc-prod
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/e2e-prod${var.app_name_suffix}
+    variables:
+      catalog: "hc_prod"

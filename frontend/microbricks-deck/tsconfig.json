@@ -1,0 +1,30 @@
+{
+    "compilerOptions": {
+      "incremental": true,
+      "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+      "target": "ESNext",
+      "useDefineForClassFields": true,
+      "lib": ["ESNext", "DOM", "DOM.Iterable"],
+      "module": "ESNext",
+      "skipLibCheck": true,
+
+      "moduleResolution": "bundler",
+      "allowImportingTsExtensions": true,
+      "verbatimModuleSyntax": false,
+      "moduleDetection": "force",
+      "noEmit": true,
+      "jsx": "react-jsx",
+
+      "strict": true,
+      "noUnusedLocals": true,
+      "noUnusedParameters": true,
+      "noFallthroughCasesInSwitch": true,
+      "noUncheckedSideEffectImports": true,
+
+      "baseUrl": ".",
+      "paths": {
+        "@/*": ["./src/microbricks_deck/ui/*"]
+      }
+    },
+    "include": ["src/microbricks_deck/ui", "vite.config.ts", "src/microbricks_deck/ui/types/vite-env.d.ts"]
+  }

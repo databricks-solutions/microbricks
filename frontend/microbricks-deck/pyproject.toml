@@ -1,0 +1,66 @@
+[project]
+name = "microbricks-deck"
+dynamic = ["version"]
+description = "Interactive presentation web app explaining microbricks architecture, CI/CD, and design philosophy."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.74.0",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.apx.metadata]
+app-name = "microbricks-deck"
+app-slug = "microbricks_deck"
+app-entrypoint = "microbricks_deck.backend.app:app"
+api-prefix = "/api"
+healthz = "/api/healthz"
+metadata-path = "src/microbricks_deck/_metadata.py"
+
+[tool.apx.ui]
+root = "src/microbricks_deck/ui"
+
+[tool.apx.ui.registries]
+"@animate-ui" = "https://animate-ui.com/r/{name}.json"
+
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.version]
+path = "src/microbricks_deck/_version.py"
+template = '''
+version = "{version}"
+'''
+
+[tool.hatch.build]
+artifacts = ["src/microbricks_deck/__dist__", "src/microbricks_deck/_metadata.py"]
+exclude = ["src/microbricks_deck/ui"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/microbricks_deck"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/microbricks_deck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

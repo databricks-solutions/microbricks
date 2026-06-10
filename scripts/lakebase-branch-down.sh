@@ -28,8 +28,8 @@ SLUG="$2"
 PROFILE="${3:-hc-dev}"
 
 case "$SLUG" in
-  feat-*|hotfix-*) BRANCH="$SLUG" ;;
-  *)               BRANCH="feat-$SLUG" ;;
+  feat-*|hotfix-*|e2e-*) BRANCH="$SLUG" ;;
+  *)                     BRANCH="feat-$SLUG" ;;
 esac
 
 PROJECT="projects/$SERVICE"
