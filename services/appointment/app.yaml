@@ -20,3 +20,6 @@ env:
   # `appointment_db` postgres resource is declared (see resources/appointment.yml).
   - name: ENDPOINT_NAME
     valueFrom: "appointment_db"
+
+  - name: LAKEBASE_AUTH_GROUP
+    value: "users"

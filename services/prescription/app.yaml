@@ -20,3 +20,6 @@ env:
   # `prescription_db` postgres resource is declared (see resources/prescription.yml).
   - name: ENDPOINT_NAME
     valueFrom: "prescription_db"
+
+  - name: LAKEBASE_AUTH_GROUP
+    value: "users"
