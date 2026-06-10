@@ -76,7 +76,7 @@ jobs:
           data = json.load(sys.stdin)
           apps = data if isinstance(data, list) else data.get("apps", [])
           for app in apps:
-              state = app.get("app_status", {}).get("state", "")
+              state = app.get("compute_status", {}).get("state", "")
               if state == "RUNNING":
                   print(app["name"])
           ')
