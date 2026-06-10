@@ -6,7 +6,7 @@ name: deploy-dev
 # (no `-dev` suffix — each env is its own workspace, so the namespace is
 # scoped already). All service apps bind to their `production` Lakebase
 # branch (the var default), which is the long-lived dev branch — separate
-# from the per-PR `feat-<slug>` branches owned by pr-validate.yml.
+# from the per-PR `pr-<number>` branches owned by pr-validate.yml.
 #
 # Migrations run BEFORE bundle deploy: a deploy of a new app version that
 # expects a column the DB doesn't yet have produces a brief outage; the

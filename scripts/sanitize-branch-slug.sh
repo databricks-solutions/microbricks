@@ -1,51 +1,26 @@
 #!/usr/bin/env bash
 #
-# Canonical code-branch -> Lakebase-/preview-slug transform.
+# Code-branch -> sanitized slug transform.
 #
-# Constraints from the two consumers:
-#   - Databricks App names are capped at 30 chars total. App names follow
-#     `<svc>[-<slug>]` (no `<target>` segment — see databricks.yml). The
-#     longest service prefix is `prescription-` (13 chars including the
-#     separator dash), so the slug must be ≤17 chars to keep the resulting
-#     `<svc>-<slug>` ≤30.
-#   - Lakebase resource IDs are 3-63 chars. The same slug is used for the
-#     Lakebase branch name, but that's the looser constraint — bundling at
-#     17 here also keeps Lakebase happy.
-#   - Charset for both: lowercase letters, digits, dashes; must not start
-#     or end with a dash.
+# NOTE: PR workflows now use `pr-<number>` as the slug (computed directly in
+# the workflow YAML), which is always short enough for the 30-char app-name
+# limit. This script is retained for local/manual use and the orphan-cleanup
+# fallback, but is NO LONGER the canonical slug source for CI.
 #
-# Output ALWAYS includes the `feat-` (5 char) or `hotfix-` (7 char) prefix.
-# Conventional GitFlow branches map naturally:
-#   feature/... -> feat-...
-#   hotfix/...  -> hotfix-...
-# Anything else (a bare topic branch like `dev`, a release branch, etc.) is
-# defaulted to `feat-` so every downstream consumer can rely on the prefix:
-#   - lakebase-branch-{up,down}.sh use the slug verbatim as the branch name
-#     (they have a legacy `feat-` fallback for safety, but no longer rely
-#     on it).
-#   - `databricks bundle deploy --var lakebase_branch=<slug>` resolves the
-#     Lakebase branch reference inside each `resources/<svc>.yml`.
-#   - `databricks bundle deploy --var app_name_suffix=-<slug>` produces the
-#     per-PR Databricks App names.
-# If the prefix isn't applied here, those four consumers disagree (preview
-# deploy fails with "branch projects/<svc>/branches/<bare-slug> does not
-# exist" while the branch was actually created at `feat-<bare-slug>`).
+# Constraints:
+#   - Databricks App names are capped at 30 chars total. The longest app
+#     prefix is `microbricks-deck-` (17 chars including the dash), so slugs
+#     must be ≤13 chars. The `pr-<number>` format (e.g. `pr-21` = 5 chars)
+#     always satisfies this.
+#   - Lakebase resource IDs are 3-63 chars — not the binding constraint.
+#   - Charset: lowercase letters, digits, dashes; must not start/end with dash.
 #
-# Available characters for the user-meaningful tail: 17 - 5 = 12 chars after
-# `feat-`, or 17 - 7 = 10 chars after `hotfix-`. Comfortably enough for a
-# ticket id + a short hint like "hc-123-skew".
-#
-# Inputs accepted as $1 OR on stdin (the workflows pass $GITHUB_HEAD_REF as $1).
-# Examples (cap=17):
-#   feature/HC-123-add-allergies     -> feat-hc-123-add-a  (truncated)
-#   hotfix/HC-456-rounding           -> hotfix-hc-456-rou  (truncated)
-#   feature/HC-99                    -> feat-hc-99         (10 chars, fits)
-#   dev                              -> feat-dev           (bare branch)
-#   release/v0.4.0                   -> feat-release-v0-4  (truncated)
-#
-# This is the single source of truth — the .github workflows and the
-# `hc-lakebase-branching` skill both reference this exact transform. If you
-# change the rules, update both places.
+# Inputs accepted as $1 OR on stdin.
+# Examples (cap=13):
+#   feature/HC-123-add-allergies     -> feat-hc-123-a  (truncated)
+#   hotfix/HC-456-rounding           -> hotfix-hc-456  (truncated)
+#   feature/HC-99                    -> feat-hc-99     (fits)
+#   dev                              -> feat-dev       (bare branch)
 set -euo pipefail
 
 input="${1:-$(cat)}"
@@ -55,8 +30,8 @@ if [[ -z "${input:-}" ]]; then
   exit 2
 fi
 
-# Hard cap derived from `prescription-` (13 chars) + slug = ≤30 (Apps limit).
-SLUG_MAX=17
+# Hard cap derived from `microbricks-deck-` (17 chars) + slug = ≤30 (Apps limit).
+SLUG_MAX=13
 
 # Step 1: lowercase, map conventional prefixes, and clean the charset. We do
 # NOT truncate yet — the prefix must be applied to the un-truncated body so

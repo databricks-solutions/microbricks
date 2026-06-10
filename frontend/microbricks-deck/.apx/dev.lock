@@ -1,0 +1,8 @@
+{
+  "pid": 34505,
+  "started_at": "2026-06-09T19:00:49.911566+00:00",
+  "port": 9004,
+  "command": "uv run apx dev __internal__run_server --app-dir /Users/emanuele.rinaldi/microservice_apps/frontend/microbricks-deck --host 127.0.0.1 --port 9004",
+  "app_dir": "/Users/emanuele.rinaldi/microservice_apps/frontend/microbricks-deck",
+  "token": "bdUF5vUqyOeSPZ9sfvBUjjXVG46BfMES"
+}
