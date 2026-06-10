@@ -21,6 +21,8 @@ include:
 sync:
   include:
     - frontend/*/src/*/__dist__/**
+    - services/*/uv.lock
+    - frontend/*/uv.lock
 
 variables:
   catalog:

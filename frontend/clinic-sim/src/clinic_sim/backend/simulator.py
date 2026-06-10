@@ -442,6 +442,7 @@ async def run_simulation(
     user_token: str,
     *,
     count: int,
+    branch: str | None = None,
     register_probability: float = 0.3,
     lab_probability: float = 0.4,
     rx_probability: float = 0.5,
@@ -466,12 +467,12 @@ async def run_simulation(
     sem = asyncio.Semaphore(max_concurrency)
 
     async with (
-        PatientClient(user_token) as patient_client,
-        ProviderClient(user_token) as provider_client,
-        AppointmentClient(user_token) as appointment_client,
-        LabClient(user_token) as lab_client,
-        PrescriptionClient(user_token) as rx_client,
-        BillingClient(user_token) as billing_client,
+        PatientClient(user_token, branch) as patient_client,
+        ProviderClient(user_token, branch) as provider_client,
+        AppointmentClient(user_token, branch) as appointment_client,
+        LabClient(user_token, branch) as lab_client,
+        PrescriptionClient(user_token, branch) as rx_client,
+        BillingClient(user_token, branch) as billing_client,
     ):
         # One-shot prefetch of patient + provider pools. If the patient list
         # is empty we'll just always register-new; if the provider list is

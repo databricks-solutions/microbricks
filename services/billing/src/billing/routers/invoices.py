@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..auth import user_email, user_token
+from ..auth import branch_name, user_email, user_token
 from ..db import get_pool
 
 router = APIRouter(tags=["invoices"])
@@ -65,6 +65,7 @@ class InvoicePage(BaseModel):
 async def list_invoices(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: str | None = None,
     q: str | None = None,
@@ -87,7 +88,7 @@ async def list_invoices(
         "limit": safe_limit,
         "offset": safe_offset,
     }
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -148,6 +149,7 @@ async def list_invoices(
 async def count_invoices(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: str | None = None,
 ) -> CountOut:
@@ -155,7 +157,7 @@ async def count_invoices(
 
     SQL is a single literal (ty-friendly); each filter is gated by
     `<param> IS NULL OR <col> = <param>` and short-circuits when omitted."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -180,8 +182,9 @@ async def get_invoice(
     invoice_id: UUID,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ):
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, patient_id, appointment_id, total_amount_cents, currency, "
@@ -214,10 +217,11 @@ async def create_invoice(
     payload: InvoiceCreate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> InvoiceOut:
     """Issue a new invoice."""
     issued_at = payload.issued_at or datetime.now(timezone.utc)
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -265,9 +269,10 @@ async def update_invoice_status(
     payload: InvoiceStatusUpdate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> InvoiceOut:
     """Move an invoice through its lifecycle."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """

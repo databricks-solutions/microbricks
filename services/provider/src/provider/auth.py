@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Query
 
 _LOCAL_DEV = os.environ.get("LOCAL_DEV_TOKEN_FROM_CLI") == "true"
 
@@ -62,3 +62,17 @@ async def user_email(
             return local
 
     raise HTTPException(401, "Missing user email")
+
+
+async def branch_name(
+    branch_name: str | None = Query(default=None),
+) -> str | None:
+    """Optional Lakebase branch override.
+
+    When set, the service connects to
+    `projects/{SERVICE_NAME}/branches/{branch_name}/endpoints/primary` instead
+    of the default ENDPOINT_NAME from the environment. This allows frontends
+    deployed against a feature branch to reuse production services while
+    targeting non-production data.
+    """
+    return branch_name

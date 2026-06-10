@@ -101,6 +101,7 @@ function SimulatorPage() {
   // we keep refs in lockstep.
   const activeRef = useRef<Record<number, ActivePatient>>({});
   const visibleRef = useRef<number[]>([]);
+  const sampleIdRef = useRef(0);
 
   const flushPending = useCallback(() => {
     rafRef.current = null;
@@ -194,6 +195,7 @@ function SimulatorPage() {
           byService[ev.service] = cur;
 
           newSamples.push({
+            id: ++sampleIdRef.current,
             t: ev.elapsed_ms,
             service: ev.service,
             op: ev.op,
@@ -213,14 +215,22 @@ function SimulatorPage() {
       } else {
         const latestT = newSamples[newSamples.length - 1]!.t;
         const cutoff = latestT - TIMELINE_WINDOW_MS;
-        const merged = [...prev.timeline, ...newSamples];
-        // Slice off anything that fell out of the window; both arrays are
-        // monotonic in `t` so a simple index walk would also work, but a
-        // .filter is plenty for our buffer sizes.
-        const filtered = merged.filter((s) => s.t >= cutoff);
-        timeline = filtered.length > TIMELINE_CAP
-          ? filtered.slice(-TIMELINE_CAP)
-          : filtered;
+        // Both arrays are monotonic in `t`, so binary-search for the
+        // cutoff index instead of allocating a merged+filtered copy.
+        const old = prev.timeline;
+        let lo = 0, hi = old.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if (old[mid]!.t < cutoff) lo = mid + 1; else hi = mid;
+        }
+        // `lo` is the first index still inside the window.
+        const kept = lo === 0 ? old : old.slice(lo);
+        const merged = kept.length === 0 ? newSamples
+          : newSamples.length === 0 ? kept
+          : [...kept, ...newSamples];
+        timeline = merged.length > TIMELINE_CAP
+          ? merged.slice(-TIMELINE_CAP)
+          : merged;
       }
       const elapsedSec = Math.max(0.001, (performance.now() - startTimeRef.current) / 1000);
       const callsPerSecond = totalCalls / elapsedSec;

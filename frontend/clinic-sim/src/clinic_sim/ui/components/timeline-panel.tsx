@@ -167,14 +167,14 @@ export function TimelinePanel({ samples, windowMs = 30_000 }: TimelinePanelProps
               No calls yet — start the simulator to see the timeline.
             </text>
           ) : (
-            points.map((p, i) => {
+            points.map((p) => {
               const fx = (p.t - xMin) / xRange;
               const cx = PAD_LEFT + fx * innerW;
               const cy = PAD_TOP + yScale(p.latencyMs, yMax, innerH);
               const color = SERVICE_META[p.service]?.color ?? FALLBACK_COLOR;
               return (
                 <circle
-                  key={`${p.t}-${i}`}
+                  key={p.id}
                   cx={cx}
                   cy={cy}
                   r={p.ok ? 2.8 : 3.4}
