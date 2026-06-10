@@ -31,8 +31,8 @@ class PatientCreatePayload(BaseModel):
 
 
 class PatientClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="patient")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="patient", branch=branch)
 
     async def list(self, *, limit: int = 200) -> list[Patient]:
         """All patients (up to one page) for the simulator's directory cache.

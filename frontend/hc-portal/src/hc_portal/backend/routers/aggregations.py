@@ -35,7 +35,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ...auth import user_token
+from ...auth import branch_name, user_token
 from ...clients import (
     AppointmentClient,
     BillingClient,
@@ -77,6 +77,7 @@ class PatientSummaryOut(BaseModel):
 async def patient_summary(
     patient_id: UUID,
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> PatientSummaryOut:
     """Compose a single patient view from five backend services concurrently.
 
@@ -85,12 +86,12 @@ async def patient_summary(
     section. If the patient lookup itself fails the response is a 502.
     """
     async with (
-        PatientClient(token) as patient,
-        AppointmentClient(token) as appointment,
-        LabClient(token) as lab,
-        PrescriptionClient(token) as rx,
-        BillingClient(token) as billing,
-        ProviderClient(token) as provider,
+        PatientClient(token, branch) as patient,
+        AppointmentClient(token, branch) as appointment,
+        LabClient(token, branch) as lab,
+        PrescriptionClient(token, branch) as rx,
+        BillingClient(token, branch) as billing,
+        ProviderClient(token, branch) as provider,
     ):
         results = await asyncio.gather(
             patient.get(patient_id),
@@ -161,6 +162,7 @@ class DashboardStatsOut(BaseModel):
 )
 async def dashboard_stats(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> DashboardStatsOut:
     """Return aggregate counts for the dashboard overview cards.
 
@@ -173,12 +175,12 @@ async def dashboard_stats(
     today = date.today()
 
     async with (
-        PatientClient(token) as patient,
-        ProviderClient(token) as provider,
-        AppointmentClient(token) as appointment,
-        PrescriptionClient(token) as rx,
-        LabClient(token) as lab,
-        BillingClient(token) as billing,
+        PatientClient(token, branch) as patient,
+        ProviderClient(token, branch) as provider,
+        AppointmentClient(token, branch) as appointment,
+        PrescriptionClient(token, branch) as rx,
+        LabClient(token, branch) as lab,
+        BillingClient(token, branch) as billing,
     ):
         results = await asyncio.gather(
             patient.count(),
@@ -252,6 +254,7 @@ class AppointmentsPageOut(BaseModel):
 )
 async def list_appointments(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     status: str | None = None,
     visit_type_code: str | None = None,
@@ -279,9 +282,9 @@ async def list_appointments(
     safe_limit, safe_offset = _clamp(limit, offset)
 
     async with (
-        AppointmentClient(token) as appointment,
-        PatientClient(token) as patient,
-        ProviderClient(token) as provider,
+        AppointmentClient(token, branch) as appointment,
+        PatientClient(token, branch) as patient,
+        ProviderClient(token, branch) as provider,
     ):
         # Cross-service filter: if the user searched by patient name, resolve
         # the matching patient IDs first so the appointment-svc page is
@@ -400,6 +403,7 @@ class ProvidersPageOut(BaseModel):
 )
 async def list_providers(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     is_active: bool | None = None,
     limit: int = 50,
@@ -408,7 +412,7 @@ async def list_providers(
     """Paginated provider directory with name/NPI/email search and an
     active-only toggle."""
     safe_limit, safe_offset = _clamp(limit, offset)
-    async with ProviderClient(token) as provider:
+    async with ProviderClient(token, branch) as provider:
         page = await provider.list(
             q=q, is_active=is_active, limit=safe_limit, offset=safe_offset
         )
@@ -457,6 +461,7 @@ class BillingOverviewOut(BaseModel):
 )
 async def billing_overview(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     status: str | None = None,
     patient_q: str | None = None,
@@ -473,8 +478,8 @@ async def billing_overview(
     safe_limit, safe_offset = _clamp(limit, offset)
 
     async with (
-        BillingClient(token) as billing,
-        PatientClient(token) as patient,
+        BillingClient(token, branch) as billing,
+        PatientClient(token, branch) as patient,
     ):
         # Cross-service filter: patient_q → patient ID set.
         patient_id_filter: UUID | None = None
@@ -620,6 +625,7 @@ class LabsPageOut(BaseModel):
 )
 async def list_labs(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     status: Annotated[list[str] | None, Query()] = None,
     patient_q: str | None = None,
@@ -638,9 +644,9 @@ async def list_labs(
     safe_limit, safe_offset = _clamp(limit, offset)
 
     async with (
-        LabClient(token) as lab,
-        PatientClient(token) as patient,
-        ProviderClient(token) as provider,
+        LabClient(token, branch) as lab,
+        PatientClient(token, branch) as patient,
+        ProviderClient(token, branch) as provider,
     ):
         patient_id_filter: UUID | None = None
         partial = False
@@ -767,6 +773,7 @@ async def _scan_all(fetch_page) -> tuple[list, bool]:
 )
 async def get_alerts(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     severity: str | None = None,
     type: Annotated[str | None, Query(alias="type")] = None,
@@ -784,10 +791,10 @@ async def get_alerts(
     from datetime import datetime, timezone
 
     async with (
-        BillingClient(token) as billing,
-        LabClient(token) as lab,
-        AppointmentClient(token) as appointment,
-        PatientClient(token) as patient,
+        BillingClient(token, branch) as billing,
+        LabClient(token, branch) as lab,
+        AppointmentClient(token, branch) as appointment,
+        PatientClient(token, branch) as patient,
     ):
         results = await asyncio.gather(
             _scan_all(lambda L, O: billing.list_invoices(limit=L, offset=O)),
@@ -903,13 +910,14 @@ class TimelineEvent(BaseModel):
 async def patient_timeline(
     patient_id: UUID,
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> list[TimelineEvent]:
     """Unified chronological timeline for a patient."""
     async with (
-        AppointmentClient(token) as appointment,
-        PrescriptionClient(token) as rx,
-        LabClient(token) as lab,
-        BillingClient(token) as billing,
+        AppointmentClient(token, branch) as appointment,
+        PrescriptionClient(token, branch) as rx,
+        LabClient(token, branch) as lab,
+        BillingClient(token, branch) as billing,
     ):
         results = await asyncio.gather(
             appointment.list_for_patient(patient_id, limit=20, order="desc"),
@@ -1002,6 +1010,7 @@ class PatientsPageOut(BaseModel):
 )
 async def list_patients(
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     q: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -1013,7 +1022,7 @@ async def list_patients(
     only so the React app talks to a single origin.
     """
     safe_limit, safe_offset = _clamp(limit, offset)
-    async with PatientClient(token) as patient:
+    async with PatientClient(token, branch) as patient:
         page = await patient.list(q=q, limit=safe_limit, offset=safe_offset)
     return PatientsPageOut(
         items=[

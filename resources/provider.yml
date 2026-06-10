@@ -6,6 +6,9 @@ resources:
       name: provider${var.app_name_suffix}
       description: "System of record for clinicians, organizations, and specialties."
       source_code_path: ../services/provider
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # See resources/patient.yml for why backend services need `postgres`.
       user_api_scopes:

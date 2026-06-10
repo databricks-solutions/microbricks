@@ -48,13 +48,14 @@ class _BaseSvcClient:
     INSERT/UPDATE, whereas hc-portal mostly issues reads.
     """
 
-    def __init__(self, user_token: str, service_slug: str):
+    def __init__(self, user_token: str, service_slug: str, branch: str | None = None):
         self._client = httpx.AsyncClient(
             base_url=_resolve_base_url(service_slug),
             headers={
                 "Authorization": f"Bearer {user_token}",
                 "X-Forwarded-Access-Token": user_token,
             },
+            params={"branch_name": branch} if branch else {},
             timeout=httpx.Timeout(connect=3.0, read=10.0, write=10.0, pool=10.0),
             limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
         )

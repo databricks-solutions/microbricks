@@ -21,6 +21,8 @@ export interface PerServiceStats {
  * use a different cap and a leaner shape.
  */
 export interface CallSample {
+  /** Stable unique id for React keying. */
+  id: number;
   /** Elapsed ms since the run started — the X coordinate. */
   t: number;
   service: string;

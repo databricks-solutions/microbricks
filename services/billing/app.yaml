@@ -20,3 +20,6 @@ env:
   # postgres resource is declared (see resources/billing.yml).
   - name: ENDPOINT_NAME
     valueFrom: "billing_db"
+
+  - name: LAKEBASE_AUTH_GROUP
+    value: "users"

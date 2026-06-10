@@ -29,8 +29,8 @@ class LabOrderCreatePayload(BaseModel):
 
 
 class LabClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="lab")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="lab", branch=branch)
 
     async def create_order(self, payload: LabOrderCreatePayload) -> LabOrder:
         r = await self._client.post(

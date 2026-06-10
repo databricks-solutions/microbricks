@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ..auth import user_email, user_token
+from ..auth import branch_name, user_email, user_token
 from ..db import get_pool
 
 router = APIRouter(tags=["appointments"])
@@ -76,6 +76,7 @@ class AppointmentPage(BaseModel):
 async def list_appointments(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     provider_id: UUID | None = None,
     status: AppointmentStatus | None = None,
@@ -143,7 +144,7 @@ async def list_appointments(
           AND (%(to_date)s::date   IS NULL OR scheduled_start::date <= %(to_date)s::date)
     """
 
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(list_sql, bind)
         rows = await cur.fetchall()
@@ -178,6 +179,7 @@ async def list_appointments(
 async def count_appointments(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: AppointmentStatus | None = None,
     on_date: date | None = None,
@@ -190,7 +192,7 @@ async def count_appointments(
     filter is gated by `<param> IS NULL OR <col> = <param>` and short-circuits
     when the caller omits it.
     """
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -216,8 +218,9 @@ async def get_appointment(
     appointment_id: UUID,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ):
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, patient_id, provider_id, visit_type_code, scheduled_start, "
@@ -250,6 +253,7 @@ async def create_appointment(
     payload: AppointmentCreate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> AppointmentOut:
     """Book an appointment.
 
@@ -260,7 +264,7 @@ async def create_appointment(
     if payload.scheduled_end <= payload.scheduled_start:
         raise HTTPException(422, "scheduled_end must be after scheduled_start")
 
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         try:
             await cur.execute(
@@ -316,6 +320,7 @@ async def update_appointment_status(
     payload: AppointmentStatusUpdate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> AppointmentOut:
     """Transition an appointment through its lifecycle.
 
@@ -323,7 +328,7 @@ async def update_appointment_status(
     completed) — the DB CHECK constraint enforces the value set; clinical
     workflow ordering is the caller's responsibility.
     """
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """

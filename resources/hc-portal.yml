@@ -4,6 +4,9 @@ resources:
       name: hc-portal${var.app_name_suffix}
       description: "Healthcare clinician portal — frontend + BFF."
       source_code_path: ../frontend/hc-portal
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # No `config.env` block by default: the BFF composes every downstream
       # URL at runtime from its own platform-injected `DATABRICKS_APP_URL`.
@@ -48,43 +51,3 @@ resources:
       user_api_scopes:
         - "sql"
         - "postgres"
-
-      # Declaring each backend app as an `app` resource:
-      #   1. Records the dependency in the bundle so deploys order correctly
-      #      (services first, portal last).
-      #   2. Grants the portal's service principal `CAN_USE` on each backend
-      #      app — the platform ACL Apps uses to gate cross-app traffic.
-      # The URLs themselves are wired in `frontend/hc-portal/app.yml` via
-      # `value: ${resources.apps.<svc>_app.url}` (DAB-time substitution),
-      # because Apps' `valueFrom: <key>` resolves to the app *name*, not URL.
-      resources:
-        - name: patient_app
-          description: "Patient service backend."
-          app:
-            name: ${resources.apps.patient_app.name}
-            permission: CAN_USE
-        - name: provider_app
-          description: "Provider service backend."
-          app:
-            name: ${resources.apps.provider_app.name}
-            permission: CAN_USE
-        - name: appointment_app
-          description: "Appointment service backend."
-          app:
-            name: ${resources.apps.appointment_app.name}
-            permission: CAN_USE
-        - name: lab_app
-          description: "Lab service backend."
-          app:
-            name: ${resources.apps.lab_app.name}
-            permission: CAN_USE
-        - name: prescription_app
-          description: "Prescription service backend."
-          app:
-            name: ${resources.apps.prescription_app.name}
-            permission: CAN_USE
-        - name: billing_app
-          description: "Billing service backend."
-          app:
-            name: ${resources.apps.billing_app.name}
-            permission: CAN_USE

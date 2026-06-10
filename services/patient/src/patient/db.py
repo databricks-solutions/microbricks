@@ -1,4 +1,4 @@
-"""Per-user Lakebase connection pool. Identical across services except for env var names.
+"""Per-user Lakebase connection pool with optional runtime branch override.
 
 Per-user OBO at the DB layer: each request opens (or reuses) a pool keyed on
 the user's email (`X-Forwarded-Email`). The user's OAuth token mints a
@@ -11,6 +11,11 @@ PGHOST/PGDATABASE/PGPORT/PGSSLMODE are auto-injected by the Apps platform
 from the postgres app resource. We override PGUSER per request because the
 auto-injected value is the SP's client ID, but we want to connect as the
 user.
+
+Branch override: callers may pass `branch` to `get_pool` to dynamically
+route the connection to a different Lakebase branch (e.g. a PR preview
+branch) without redeploying the service. The endpoint host is resolved via
+the SDK and cached.
 """
 from __future__ import annotations
 
@@ -31,9 +36,11 @@ class OAuthConnection(psycopg.AsyncConnection):
     @classmethod
     async def connect(cls, conninfo: str = "", **kwargs: Any) -> "OAuthConnection":
         token: str | None = kwargs.pop("_user_token", None)
+        endpoint: str | None = kwargs.pop("_endpoint", None)
         if not token:
             raise RuntimeError("OAuthConnection requires _user_token kwarg")
-        endpoint = os.environ["ENDPOINT_NAME"]
+        if not endpoint:
+            endpoint = os.environ["ENDPOINT_NAME"]
         # auth_type="pat" forces the SDK to use ONLY the explicit user token; without
         # this it sees DATABRICKS_CLIENT_ID/SECRET (auto-injected for the app's SP)
         # and refuses ambiguous oauth+pat config.
@@ -43,20 +50,33 @@ class OAuthConnection(psycopg.AsyncConnection):
         return await super().connect(conninfo, **kwargs)
 
 
+_AUTH_GROUP = os.environ.get("LAKEBASE_AUTH_GROUP", "users")
+
 _POOL_TTL = 2700  # seconds — same as max_lifetime
 _POOL_MAX = 256   # eviction cap, prevents unbounded growth from many distinct tokens
-# `AsyncConnectionPool` is generic over its connection class. We pin it to
-# `OAuthConnection` so `_pools` and `get_pool`'s return type stay in sync —
-# the bare `AsyncConnectionPool` annotation matched `dict[..., AsyncConnection]`
-# at runtime but `ty` rejects that as a default-parameter mismatch.
 _pools: dict[str, tuple[AsyncConnectionPool[OAuthConnection], float]] = {}
 _lock = asyncio.Lock()
 
+_ENDPOINT_HOST_TTL = 300  # 5 minutes
+_endpoint_host_cache: dict[str, tuple[str, float]] = {}
 
-def _key(user_email: str, user_token: str) -> str:
-    # Email is stable across token refreshes; token still hashed in so a token
-    # rotation while the pool is open doesn't reuse a stale per-connection token.
-    return hashlib.sha256(f"{user_email}:{user_token}".encode()).hexdigest()
+
+def _key(user_email: str, user_token: str, endpoint: str) -> str:
+    return hashlib.sha256(f"{user_email}:{user_token}:{endpoint}".encode()).hexdigest()
+
+
+async def _resolve_host(endpoint_path: str, user_token: str) -> str:
+    """Resolve PGHOST for a given endpoint path, with caching."""
+    now = time.monotonic()
+    cached = _endpoint_host_cache.get(endpoint_path)
+    if cached and cached[1] > now:
+        return cached[0]
+    ws = WorkspaceClient(token=user_token, auth_type="pat")
+    ep = ws.postgres.get_endpoint(endpoint_path)
+    assert ep.status is not None and ep.status.hosts is not None and ep.status.hosts.host is not None
+    host = ep.status.hosts.host
+    _endpoint_host_cache[endpoint_path] = (host, now + _ENDPOINT_HOST_TTL)
+    return host
 
 
 async def _evict_expired() -> None:
@@ -67,9 +87,24 @@ async def _evict_expired() -> None:
         await pool.close()
 
 
-async def get_pool(user_email: str, user_token: str) -> AsyncConnectionPool[OAuthConnection]:
-    """Return a (cached) connection pool bound to the user's identity."""
-    key = _key(user_email, user_token)
+async def get_pool(
+    user_email: str, user_token: str, branch: str | None = None
+) -> AsyncConnectionPool[OAuthConnection]:
+    """Return a (cached) connection pool bound to the user's identity.
+
+    If `branch` is provided, the pool connects to the specified Lakebase branch
+    instead of the default one from `ENDPOINT_NAME` / `PGHOST`. This allows
+    frontends to test against non-production branches without redeploying the service.
+    """
+    service = os.environ.get("SERVICE_NAME", "unknown")
+    if branch:
+        endpoint = f"projects/{service}/branches/{branch}/endpoints/primary"
+        host = await _resolve_host(endpoint, user_token)
+    else:
+        endpoint = os.environ["ENDPOINT_NAME"]
+        host = os.environ["PGHOST"]
+
+    key = _key(user_email, user_token, endpoint)
     async with _lock:
         await _evict_expired()
         cached = _pools.get(key)
@@ -81,20 +116,18 @@ async def get_pool(user_email: str, user_token: str) -> AsyncConnectionPool[OAut
             old_pool, _ = _pools.pop(oldest_key)
             await old_pool.close()
 
-        host = os.environ["PGHOST"]
         port = os.environ.get("PGPORT", "5432")
         dbname = os.environ.get("PGDATABASE", "databricks_postgres")
         sslmode = os.environ.get("PGSSLMODE", "require")
 
+        pg_user = _AUTH_GROUP if _AUTH_GROUP else user_email
         pool = AsyncConnectionPool(
-            # user=user_email — the calling user's Postgres role, not PGUSER
-            # (which the platform auto-injects as the SP's client ID).
-            conninfo=f"host={host} port={port} dbname={dbname} user={user_email} sslmode={sslmode}",
+            conninfo=f"host={host} port={port} dbname={dbname} user={pg_user} sslmode={sslmode}",
             connection_class=OAuthConnection,
             max_lifetime=_POOL_TTL,
             min_size=0,
             max_size=4,
-            kwargs={"_user_token": user_token},
+            kwargs={"_user_token": user_token, "_endpoint": endpoint},
             open=False,
         )
         await pool.open()

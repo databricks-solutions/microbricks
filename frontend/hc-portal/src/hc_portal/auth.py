@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Query
 
 _LOCAL_DEV = os.environ.get("LOCAL_DEV_TOKEN_FROM_CLI") == "true"
 
@@ -42,3 +42,18 @@ async def user_token(
             return local
 
     raise HTTPException(401, "Missing user token")
+
+
+async def branch_name(
+    branch_name: str | None = Query(default=None),
+) -> str | None:
+    """Lakebase branch override forwarded to all downstream services.
+
+    Priority:
+      1. ?branch_name=... query param (explicit per-request override)
+      2. LAKEBASE_BRANCH env var (set in app.yaml for CI/CD)
+      3. None — services use their default branch
+    """
+    if branch_name:
+        return branch_name
+    return os.environ.get("LAKEBASE_BRANCH")

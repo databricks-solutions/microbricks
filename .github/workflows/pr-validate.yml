@@ -7,9 +7,14 @@ name: pr-validate
 #   3. Runs lint + unit tests for each changed service in parallel.
 #   4. Provisions a Lakebase feature-branch per changed *backend* service.
 #   5. Runs `alembic upgrade head` against each feature branch.
-#   6. Deploys a preview bundle (`databricks bundle deploy -t dev`) with
-#      `app_name_suffix=-<slug>` and `lakebase_branch=<slug>`.
+#   6. Deploys a preview bundle with `app_name_suffix=-<slug>` and
+#      `lakebase_branch=<slug>`.
 #   7. Smoke-tests the preview, then comments the URLs on the PR.
+#
+# Environment routing:
+#   - PRs targeting `develop` deploy to the dev workspace (`-t dev`).
+#   - PRs targeting `main` or `release/*` deploy to the test workspace
+#     (`-t e2e-test`), mirroring where the merge will land.
 
 on:
   pull_request:
@@ -26,7 +31,7 @@ concurrency:
 
 env:
   DATABRICKS_CLI_VERSION: "1.2.1"
-  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
+  DATABRICKS_HOST: ${{ github.event.pull_request.base.ref == 'develop' && vars.DATABRICKS_HOST_DEV || vars.DATABRICKS_HOST_TEST }}
   DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
   DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
@@ -49,12 +54,31 @@ jobs:
       all_app_names: ${{ steps.disc.outputs.all_app_names }}
       services_json: ${{ steps.disc.outputs.services_json }}
       frontends_json: ${{ steps.disc.outputs.frontends_json }}
+      deploy_env: ${{ steps.env.outputs.deploy_env }}
+      bundle_target: ${{ steps.env.outputs.bundle_target }}
+      db_profile: ${{ steps.env.outputs.db_profile }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Resolve deploy environment from PR base branch
+        id: env
+        run: |
+          BASE="${{ github.event.pull_request.base.ref }}"
+          if [[ "$BASE" == "develop" ]]; then
+            echo "deploy_env=dev"       >> "$GITHUB_OUTPUT"
+            echo "bundle_target=dev"    >> "$GITHUB_OUTPUT"
+            echo "db_profile=hc-dev"    >> "$GITHUB_OUTPUT"
+          else
+            # main and release/* PRs validate in the test workspace
+            echo "deploy_env=test"      >> "$GITHUB_OUTPUT"
+            echo "bundle_target=e2e-test" >> "$GITHUB_OUTPUT"
+            echo "db_profile=hc-test"   >> "$GITHUB_OUTPUT"
+          fi
+          echo "Base branch: $BASE → env=$(grep deploy_env "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
 
       - name: Discover projects
         id: disc
@@ -179,7 +203,7 @@ jobs:
     needs: detect-changes
     runs-on: ubuntu-latest
     environment:
-      name: dev
+      name: ${{ needs.detect-changes.outputs.deploy_env }}
     steps:
       - uses: actions/checkout@v4
 
@@ -192,25 +216,21 @@ jobs:
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
 
-      - name: Write hc-dev profile to ~/.databrickscfg
-        env:
-          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      - name: Write Databricks profile to ~/.databrickscfg
         run: |
           mkdir -p "$HOME"
           cat > "$HOME/.databrickscfg" <<EOF
-          [hc-dev]
+          [${{ needs.detect-changes.outputs.db_profile }}]
           host = ${DATABRICKS_HOST}
           client_id = ${DATABRICKS_CLIENT_ID}
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me --profile hc-dev
+          databricks current-user me --profile ${{ needs.detect-changes.outputs.db_profile }}
 
       - name: bundle validate
         run: |
-          databricks bundle validate -t dev \
+          databricks bundle validate -t ${{ needs.detect-changes.outputs.bundle_target }} \
             --var "app_name_suffix=-${{ needs.detect-changes.outputs.slug }}" \
             --var "lakebase_branch=${{ needs.detect-changes.outputs.slug }}"
 
@@ -228,7 +248,7 @@ jobs:
       (needs.frontend-checks.result == 'success' || needs.frontend-checks.result == 'skipped')
     runs-on: ubuntu-latest
     environment:
-      name: dev
+      name: ${{ needs.detect-changes.outputs.deploy_env }}
       url: ${{ steps.urls.outputs.portal_url }}
     steps:
       - uses: actions/checkout@v4
@@ -246,69 +266,63 @@ jobs:
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
 
-      - name: Write hc-dev profile to ~/.databrickscfg
-        env:
-          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      - name: Write Databricks profile to ~/.databrickscfg
         run: |
           mkdir -p "$HOME"
           cat > "$HOME/.databrickscfg" <<EOF
-          [hc-dev]
+          [${{ needs.detect-changes.outputs.db_profile }}]
           host = ${DATABRICKS_HOST}
           client_id = ${DATABRICKS_CLIENT_ID}
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me --profile hc-dev
+          databricks current-user me --profile ${{ needs.detect-changes.outputs.db_profile }}
 
       - name: Compute changed-services list
         id: changed
         env:
-          ALL_CHANGES: ${{ needs.detect-changes.outputs.service_changes }}
-          SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
         run: |
-          OUT=()
-          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
-            if echo "$ALL_CHANGES" | grep -q "\"$svc\""; then
-              OUT+=("$svc")
-            fi
-          done
-          echo "services=${OUT[*]}" >> "$GITHUB_OUTPUT"
-          echo "Changed services: ${OUT[*]}"
+          echo "services=$CHANGED_SERVICES" >> "$GITHUB_OUTPUT"
+          echo "Changed services: $CHANGED_SERVICES"
 
       - name: Ensure Lakebase projects exist (idempotent)
         env:
           SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
+          DEPLOY_ENV: ${{ needs.detect-changes.outputs.deploy_env }}
         run: |
           for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
-            ./scripts/lakebase-project-up.sh "$svc" dev hc-dev
+            ./scripts/lakebase-project-up.sh "$svc" "$DEPLOY_ENV" "$DB_PROFILE"
           done
 
       - name: Provision Lakebase feature branches (all services)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
         run: |
           set -euo pipefail
           for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
-            ./scripts/lakebase-branch-up.sh "$svc" "$SLUG" hc-dev
+            ./scripts/lakebase-branch-up.sh "$svc" "$SLUG" "$DB_PROFILE"
           done
 
       - name: Run migrations against feature branches
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
+          CHANGED_SERVICES: ${{ steps.changed.outputs.services }}
         run: |
           set -euo pipefail
-          for svc in ${{ steps.changed.outputs.services }}; do
+          for svc in $(echo "$CHANGED_SERVICES" | jq -r '.[]'); do
             echo "→ Migrating $svc against $SLUG"
             cd "services/$svc"
             ENDPOINT="projects/$svc/branches/$SLUG/endpoints/primary"
-            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p "$DB_PROFILE" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
             export PGHOST="$HOST"
             export PGPORT=5432
             export PGDATABASE=databricks_postgres
-            export PGUSER=$(databricks current-user me -p hc-dev -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+            export PGUSER=$(databricks current-user me -p "$DB_PROFILE" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
             uv sync --all-groups
@@ -361,14 +375,15 @@ jobs:
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           CHANGED_KEYS: ${{ steps.bundle-keys.outputs.keys }}
+          BUNDLE_TARGET: ${{ needs.detect-changes.outputs.bundle_target }}
         run: |
           set -euo pipefail
           SELECT_ARGS=""
           for KEY in $(echo "$CHANGED_KEYS" | jq -r '.[]'); do
             SELECT_ARGS="$SELECT_ARGS --select apps.$KEY"
           done
-          echo "→ Deploying:$SELECT_ARGS"
-          databricks bundle deploy -t dev \
+          echo "→ Deploying:$SELECT_ARGS (target=$BUNDLE_TARGET)"
+          databricks bundle deploy -t "$BUNDLE_TARGET" \
             --var "app_name_suffix=-$SLUG" \
             --var "lakebase_branch=$SLUG" \
             $SELECT_ARGS
@@ -377,13 +392,14 @@ jobs:
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           CHANGED_KEYS: ${{ steps.bundle-keys.outputs.keys }}
+          BUNDLE_TARGET: ${{ needs.detect-changes.outputs.bundle_target }}
         run: |
           set -euo pipefail
           LOG_DIR=$(mktemp -d)
           mapfile -t KEYS < <(echo "$CHANGED_KEYS" | jq -r '.[]')
           PIDS=()
           for KEY in "${KEYS[@]}"; do
-            databricks bundle run -t dev "apps.$KEY" \
+            databricks bundle run -t "$BUNDLE_TARGET" "apps.$KEY" \
               --var "app_name_suffix=-$SLUG" \
               --var "lakebase_branch=$SLUG" \
               > "$LOG_DIR/$KEY.log" 2>&1 &
@@ -428,11 +444,12 @@ jobs:
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
         run: |
           set -euo pipefail
           for app in $(echo "$CHANGED_APP_NAMES" | jq -r '.[]'); do
             for i in $(seq 1 20); do
-              STATE=$(databricks apps get "$app-$SLUG" -p hc-dev -o json \
+              STATE=$(databricks apps get "$app-$SLUG" -p "$DB_PROFILE" -o json \
                 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("compute_status",{}).get("state",""))')
               echo "  $app-$SLUG attempt $i/20: state=$STATE"
               if [[ "$STATE" == "ACTIVE" || "$STATE" == "RUNNING" ]]; then
@@ -453,6 +470,7 @@ jobs:
           CHANGED_FRONTENDS: ${{ needs.detect-changes.outputs.changed_frontends }}
           SERVICES_JSON: ${{ needs.detect-changes.outputs.services_json }}
           FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
         run: |
           set -euo pipefail
           TOKEN=$(curl -sS --fail \
@@ -464,7 +482,7 @@ jobs:
           assert_healthz() {
             local app="$1" path="$2"
             local url body_file http_code body
-            url=$(databricks apps get "$app" -p hc-dev -o json \
+            url=$(databricks apps get "$app" -p "$DB_PROFILE" -o json \
               | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
             if [[ -z "$url" ]]; then
               echo "::error::$app has no URL — deploy may have failed"
@@ -511,18 +529,20 @@ jobs:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
           FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, subprocess
           slug = os.environ["SLUG"]
+          profile = os.environ["DB_PROFILE"]
           changed_apps = json.loads(os.environ["CHANGED_APP_NAMES"])
           frontends = json.loads(os.environ["FRONTENDS_JSON"])
           urls = {}
           for app_name in changed_apps:
               app = f"{app_name}-{slug}"
               out = subprocess.check_output(
-                  ["databricks","apps","get",app,"-p","hc-dev","-o","json"],
+                  ["databricks","apps","get",app,"-p",profile,"-o","json"],
                   text=True,
               )
               urls[app_name] = json.loads(out).get("url","") or ""
@@ -578,15 +598,17 @@ jobs:
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           SERVICE_DIRS: ${{ needs.detect-changes.outputs.service_dirs }}
+          BUNDLE_TARGET: ${{ needs.detect-changes.outputs.bundle_target }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
         run: |
           set -uo pipefail
           echo "::warning::Pipeline failed — tearing down preview resources for $SLUG"
           echo "→ Destroying bundle..."
-          databricks bundle destroy -t dev --auto-approve \
+          databricks bundle destroy -t "$BUNDLE_TARGET" --auto-approve \
             --var "app_name_suffix=-$SLUG" \
             --var "lakebase_branch=$SLUG" || echo "  bundle destroy failed (may be partial)"
           echo "→ Removing Lakebase branches..."
           for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
-            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" hc-dev || echo "  $svc branch-down failed (may not exist)"
+            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" "$DB_PROFILE" || echo "  $svc branch-down failed (may not exist)"
           done
           echo "Teardown complete."

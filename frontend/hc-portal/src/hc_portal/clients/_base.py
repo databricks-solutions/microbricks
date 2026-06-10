@@ -102,13 +102,14 @@ def _resolve_base_url(service_slug: str) -> str:
 class _BaseSvcClient:
     """Base for typed per-service clients. Always forwards the user's OBO token."""
 
-    def __init__(self, user_token: str, service_slug: str):
+    def __init__(self, user_token: str, service_slug: str, branch: str | None = None):
         self._client = httpx.AsyncClient(
             base_url=_resolve_base_url(service_slug),
             headers={
                 "Authorization": f"Bearer {user_token}",
                 "X-Forwarded-Access-Token": user_token,
             },
+            params={"branch_name": branch} if branch else {},
             timeout=httpx.Timeout(connect=2.0, read=5.0, write=5.0, pool=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )

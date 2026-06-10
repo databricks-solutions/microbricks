@@ -6,6 +6,9 @@ resources:
       name: appointment${var.app_name_suffix}
       description: "System of record for scheduled and historical visits, open slots, and visit types."
       source_code_path: ../services/appointment
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # See resources/patient.yml for why backend services need `postgres`.
       user_api_scopes:

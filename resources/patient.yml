@@ -20,6 +20,9 @@ resources:
       name: patient${var.app_name_suffix}
       description: "System of record for patient demographics, addresses, and consent."
       source_code_path: ../services/patient
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # OBO scope the user's forwarded token (X-Forwarded-Access-Token) must
       # carry. The service uses that token to mint Lakebase credentials per

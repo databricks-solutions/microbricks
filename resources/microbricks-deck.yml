@@ -4,3 +4,6 @@ resources:
       name: microbricks-deck${var.app_name_suffix}
       description: "Interactive presentation web app explaining microbricks architecture, CI/CD, and design philosophy."
       source_code_path: ../frontend/microbricks-deck
+      permissions:
+        - level: CAN_USE
+          group_name: users

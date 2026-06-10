@@ -20,3 +20,6 @@ env:
   # postgres resource is declared (see resources/lab.yml).
   - name: ENDPOINT_NAME
     valueFrom: "lab_db"
+
+  - name: LAKEBASE_AUTH_GROUP
+    value: "users"

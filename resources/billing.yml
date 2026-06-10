@@ -6,6 +6,9 @@ resources:
       name: billing${var.app_name_suffix}
       description: "System of record for invoices, payer claims, and payments."
       source_code_path: ../services/billing
+      permissions:
+        - level: CAN_USE
+          group_name: users
 
       # See resources/patient.yml for why backend services need `postgres`.
       user_api_scopes:

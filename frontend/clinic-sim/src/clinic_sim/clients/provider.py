@@ -19,8 +19,8 @@ class Provider(BaseModel):
 
 
 class ProviderClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="provider")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="provider", branch=branch)
 
     async def list(self, *, limit: int = 200) -> list[Provider]:
         """All providers (up to one page) for the simulator's directory cache.

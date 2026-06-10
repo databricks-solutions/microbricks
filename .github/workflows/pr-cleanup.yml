@@ -27,22 +27,35 @@ concurrency:
 
 env:
   DATABRICKS_CLI_VERSION: "1.2.1"
-  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
+  DATABRICKS_HOST: ${{ github.event.pull_request.base.ref == 'develop' && vars.DATABRICKS_HOST_DEV || vars.DATABRICKS_HOST_TEST }}
   DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
   DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
 jobs:
   destroy-preview:
     runs-on: ubuntu-latest
-    # See pr-validate.yml's bundle-validate job for the env/secrets pattern.
     environment:
-      name: dev
+      name: ${{ github.event.pull_request.base.ref == 'develop' && 'dev' || 'test' }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Resolve deploy environment from PR base branch
+        id: env
+        run: |
+          BASE="${{ github.event.pull_request.base.ref }}"
+          if [[ "$BASE" == "develop" ]]; then
+            echo "bundle_target=dev"    >> "$GITHUB_OUTPUT"
+            echo "db_profile=hc-dev"    >> "$GITHUB_OUTPUT"
+            echo "deploy_env=dev"       >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle_target=e2e-test" >> "$GITHUB_OUTPUT"
+            echo "db_profile=hc-test"   >> "$GITHUB_OUTPUT"
+            echo "deploy_env=test"      >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Discover services
         id: disc
@@ -61,33 +74,25 @@ jobs:
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
 
-      - name: Write hc-dev profile to ~/.databrickscfg
-        env:
-          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_DEV }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-        # See pr-validate.yml for the rationale.
+      - name: Write Databricks profile to ~/.databrickscfg
         run: |
           mkdir -p "$HOME"
           cat > "$HOME/.databrickscfg" <<EOF
-          [hc-dev]
+          [${{ steps.env.outputs.db_profile }}]
           host = ${DATABRICKS_HOST}
           client_id = ${DATABRICKS_CLIENT_ID}
           client_secret = ${DATABRICKS_CLIENT_SECRET}
           EOF
           chmod 600 "$HOME/.databrickscfg"
-          databricks current-user me -p hc-dev
+          databricks current-user me -p ${{ steps.env.outputs.db_profile }}
 
       - name: Destroy preview bundle
         env:
           SLUG: ${{ steps.slug.outputs.slug }}
-        # `bundle destroy` keyed on the same root_path the preview deploy
-        # used. `--auto-approve` skips the interactive confirmation; no
-        # human is here. Tolerant of "no bundle state at root_path"
-        # (early PR close before the first preview-deploy run completed).
+          BUNDLE_TARGET: ${{ steps.env.outputs.bundle_target }}
         run: |
           set +e
-          databricks bundle destroy -t dev \
+          databricks bundle destroy -t "$BUNDLE_TARGET" \
             --var "app_name_suffix=-$SLUG" \
             --var "lakebase_branch=$SLUG" \
             --auto-approve
@@ -101,9 +106,10 @@ jobs:
         env:
           SLUG: ${{ steps.slug.outputs.slug }}
           SERVICE_DIRS: ${{ steps.disc.outputs.service_dirs }}
+          DB_PROFILE: ${{ steps.env.outputs.db_profile }}
         run: |
           for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
-            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" hc-dev
+            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" "$DB_PROFILE"
           done
 
       - name: Comment cleanup outcome on PR

@@ -25,8 +25,8 @@ class Patient(BaseModel):
 
 
 class PatientClient(_BaseSvcClient):
-    def __init__(self, user_token: str):
-        super().__init__(user_token, service_slug="patient")
+    def __init__(self, user_token: str, branch: str | None = None):
+        super().__init__(user_token, service_slug="patient", branch=branch)
 
     async def get(self, patient_id: UUID) -> Patient:
         r = await self._client.get(f"/api/v1/patients/{patient_id}")

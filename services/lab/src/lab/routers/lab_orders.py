@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg import sql
 from pydantic import BaseModel, Field
 
-from ..auth import user_email, user_token
+from ..auth import branch_name, user_email, user_token
 from ..db import get_pool
 
 router = APIRouter(tags=["lab-orders"])
@@ -65,6 +65,7 @@ class LabOrderPage(BaseModel):
 async def list_lab_orders(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: Annotated[list[str] | None, Query()] = None,
     panel_code: str | None = None,
@@ -88,7 +89,7 @@ async def list_lab_orders(
         "limit": safe_limit,
         "offset": safe_offset,
     }
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -148,6 +149,7 @@ async def list_lab_orders(
 async def count_lab_orders(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: Annotated[list[str] | None, Query()] = None,
 ) -> CountOut:
@@ -156,7 +158,7 @@ async def count_lab_orders(
 
     SQL is a single literal (ty-friendly); each filter is gated by
     `<param> IS NULL OR ...` so omitted params short-circuit."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -181,8 +183,9 @@ async def get_lab_order(
     lab_order_id: UUID,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ):
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, patient_id, ordering_provider_id, appointment_id, panel_code, "
@@ -216,6 +219,7 @@ async def create_lab_order(
     payload: LabOrderCreate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> LabOrderOut:
     """Order a lab panel.
 
@@ -223,7 +227,7 @@ async def create_lab_order(
     services/lab/seed/seed.py).
     """
     ordered_at = payload.ordered_at or datetime.now(timezone.utc)
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         try:
             await cur.execute(
@@ -276,6 +280,7 @@ async def update_lab_order_status(
     payload: LabOrderStatusUpdate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> LabOrderOut:
     """Move a lab order through its lifecycle.
 
@@ -299,7 +304,7 @@ async def update_lab_order_status(
         args.append(now)
     args.append(lab_order_id)
 
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             sql.SQL("""

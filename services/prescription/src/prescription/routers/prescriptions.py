@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..auth import user_email, user_token
+from ..auth import branch_name, user_email, user_token
 from ..db import get_pool
 
 router = APIRouter(tags=["prescriptions"])
@@ -68,6 +68,7 @@ class PrescriptionPage(BaseModel):
 async def list_prescriptions(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: str | None = None,
     q: str | None = None,
@@ -88,7 +89,7 @@ async def list_prescriptions(
         "limit": safe_limit,
         "offset": safe_offset,
     }
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -151,6 +152,7 @@ async def list_prescriptions(
 async def count_prescriptions(
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
     patient_id: UUID | None = None,
     status: str | None = None,
 ) -> CountOut:
@@ -158,7 +160,7 @@ async def count_prescriptions(
 
     SQL is a single literal (ty-friendly); each filter is gated by
     `<param> IS NULL OR <col> = <param>` and short-circuits when omitted."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -183,8 +185,9 @@ async def get_prescription(
     prescription_id: UUID,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ):
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, patient_id, prescribing_provider_id, medication_code, "
@@ -219,6 +222,7 @@ async def create_prescription(
     payload: PrescriptionCreate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> PrescriptionOut:
     """Issue a new prescription.
 
@@ -226,7 +230,7 @@ async def create_prescription(
     (seeded via services/prescription/seed/seed.py).
     """
     start_at = payload.start_at or datetime.now(timezone.utc)
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         try:
             await cur.execute(
@@ -287,9 +291,10 @@ async def update_prescription_status(
     payload: PrescriptionStatusUpdate,
     email: Annotated[str, Depends(user_email)],
     token: Annotated[str, Depends(user_token)],
+    branch: Annotated[str | None, Depends(branch_name)],
 ) -> PrescriptionOut:
     """Cancel/complete/expire a prescription."""
-    pool = await get_pool(email, token)
+    pool = await get_pool(email, token, branch)
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
