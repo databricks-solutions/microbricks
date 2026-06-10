@@ -373,24 +373,36 @@ jobs:
             --var "lakebase_branch=$SLUG" \
             $SELECT_ARGS
 
-      - name: Run changed apps (one at a time)
+      - name: Run changed apps (parallel)
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           CHANGED_KEYS: ${{ steps.bundle-keys.outputs.keys }}
         run: |
           set -euo pipefail
-          FAIL=0
-          for KEY in $(echo "$CHANGED_KEYS" | jq -r '.[]'); do
-            echo "→ Running $KEY..."
-            if databricks bundle run -t dev "apps.$KEY" \
+          LOG_DIR=$(mktemp -d)
+          mapfile -t KEYS < <(echo "$CHANGED_KEYS" | jq -r '.[]')
+          PIDS=()
+          for KEY in "${KEYS[@]}"; do
+            databricks bundle run -t dev "apps.$KEY" \
               --var "app_name_suffix=-$SLUG" \
-              --var "lakebase_branch=$SLUG"; then
-              echo "  ✓ $KEY"
+              --var "lakebase_branch=$SLUG" \
+              > "$LOG_DIR/$KEY.log" 2>&1 &
+            PIDS+=("$!")
+            echo "→ kicked apps.$KEY (pid=$!)"
+          done
+          FAIL=0
+          for i in "${!KEYS[@]}"; do
+            KEY="${KEYS[$i]}"
+            if wait "${PIDS[$i]}"; then
+              echo "✓ $KEY"
+              tail -3 "$LOG_DIR/$KEY.log" | sed 's/^/    /'
             else
-              echo "::error::$KEY run failed"
+              echo "::error::$KEY failed; full log:"
+              cat "$LOG_DIR/$KEY.log"
               FAIL=1
             fi
           done
+          rm -rf "$LOG_DIR"
           (( FAIL == 0 )) || exit 1
 
       - name: Compute changed app names
