@@ -24,7 +24,7 @@ export function TopNav() {
               key={id}
               onClick={() => scrollTo(id)}
               className={cn(
-                "px-2.5 py-1 text-xs rounded-md transition-all duration-200",
+                "px-2.5 py-1 text-sm rounded-md transition-all duration-200",
                 active === id
                   ? "bg-primary/15 text-primary font-medium"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50",

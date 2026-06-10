@@ -47,7 +47,7 @@ export function SectionTitle({ badge, title, subtitle }: SectionTitleProps) {
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
           transition={{ delay: 0.1 }}
-          className="inline-block px-3 py-1 text-xs font-medium rounded-full bg-primary/10 text-primary border border-primary/20 mb-4"
+          className="inline-block px-3 py-1 text-sm font-medium rounded-full bg-primary/10 text-primary border border-primary/20 mb-4"
         >
           {badge}
         </motion.span>

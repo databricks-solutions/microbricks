@@ -59,7 +59,7 @@ export function ImplementationSection() {
                 {items.map((item) => (
                   <div key={item.name} className="flex items-center justify-between">
                     <span className="text-sm">{item.name}</span>
-                    <span className="text-[10px] text-muted-foreground px-2 py-0.5 rounded bg-muted">
+                    <span className="text-sm text-muted-foreground px-2 py-0.5 rounded bg-muted">
                       {item.category}
                     </span>
                   </div>
@@ -79,7 +79,7 @@ export function ImplementationSection() {
           className="rounded-xl border border-border bg-card p-5"
         >
           <h3 className="font-medium text-sm mb-3">Service pattern</h3>
-          <pre className="text-[11px] leading-relaxed text-muted-foreground overflow-x-auto font-mono bg-muted/30 rounded-lg p-4">
+          <pre className="text-sm leading-relaxed text-muted-foreground overflow-x-auto font-mono bg-muted/30 rounded-lg p-4">
             {CODE_SNIPPET}
           </pre>
         </motion.div>
@@ -101,7 +101,7 @@ export function ImplementationSection() {
                 transition={{ delay: i * 0.08 }}
                 className="flex items-start gap-2 text-sm text-muted-foreground"
               >
-                <span className="text-primary font-mono text-xs mt-0.5">{String(i + 1).padStart(2, "0")}</span>
+                <span className="text-primary font-mono text-sm mt-0.5">{String(i + 1).padStart(2, "0")}</span>
                 <span>{rule}</span>
               </motion.li>
             ))}

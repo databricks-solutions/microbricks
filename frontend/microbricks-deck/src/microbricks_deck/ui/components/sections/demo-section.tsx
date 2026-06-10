@@ -49,7 +49,7 @@ export function DemoSection() {
             </div>
             <h3 className="font-semibold mb-1">{item.title}</h3>
             <p className="text-sm text-muted-foreground mb-3">{item.description}</p>
-            <span className="inline-block text-[10px] font-mono text-primary px-2 py-0.5 rounded bg-primary/10 border border-primary/20">
+            <span className="inline-block text-sm font-mono text-primary px-2 py-0.5 rounded bg-primary/10 border border-primary/20">
               {item.tag}
             </span>
           </motion.div>
@@ -66,7 +66,7 @@ export function DemoSection() {
         <p className="text-sm text-muted-foreground">
           Databricks Apps + Lakebase + OBO Auth + DABs + GitHub Actions
         </p>
-        <p className="text-xs text-muted-foreground/60 mt-2">
+        <p className="text-sm text-muted-foreground/60 mt-2">
           microbricks — microservices on Databricks, done right
         </p>
       </motion.div>

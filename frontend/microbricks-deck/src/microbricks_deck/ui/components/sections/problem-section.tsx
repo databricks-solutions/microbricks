@@ -138,7 +138,7 @@ export function ProblemSection() {
                 transition={{ delay: 0.5 + i * 0.1 }}
               >
                 <polygon points={points} fill="var(--card)" stroke="var(--border)" strokeWidth="1.5" />
-                <text x={cx} y={cy + 4} textAnchor="middle" fill="var(--foreground)" className="text-[11px] font-medium">{app}</text>
+                <text x={cx} y={cy + 4} textAnchor="middle" fill="var(--foreground)" className="text-sm font-medium">{app}</text>
                 <line x1={cx} y1={cy + h} x2="400" y2="112" stroke="oklch(0.65 0.2 25 / 0.5)" strokeWidth="1.5" strokeDasharray="4 3" />
               </motion.g>
             );
@@ -149,7 +149,7 @@ export function ProblemSection() {
             x="400" y="210"
             textAnchor="middle"
             fill="oklch(0.65 0.2 25 / 0.85)"
-            className="text-[10px]"
+            className="text-sm"
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
@@ -175,7 +175,7 @@ export function ProblemSection() {
               <div className="shrink-0 w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                 <point.icon className="w-5 h-5 text-primary" />
               </div>
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              <span className="text-sm uppercase tracking-wider text-muted-foreground">
                 {point.category}
               </span>
             </div>
@@ -185,7 +185,7 @@ export function ProblemSection() {
             </p>
             <div className="mt-auto pt-4">
               <div className="pt-4 border-t border-border/60">
-                <p className="text-xs leading-relaxed">
+                <p className="text-sm leading-relaxed">
                   <span className="text-muted-foreground uppercase tracking-wider">
                     Impact:{" "}
                   </span>

@@ -56,7 +56,7 @@ export function ArchitectureSection() {
             <p.icon className="w-5 h-5 text-primary shrink-0 mt-0.5" />
             <div>
               <h4 className="font-medium text-sm">{p.title}</h4>
-              <p className="text-xs text-muted-foreground mt-1">{p.description}</p>
+              <p className="text-sm text-muted-foreground mt-1">{p.description}</p>
             </div>
           </motion.div>
         ))}
@@ -76,8 +76,8 @@ export function ArchitectureSection() {
             <div key={i} className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0 mt-1.5" />
               <div>
-                <span className="text-xs font-medium text-foreground">{rec.label}</span>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{rec.detail}</p>
+                <span className="text-sm font-medium text-foreground">{rec.label}</span>
+                <p className="text-sm text-muted-foreground mt-0.5">{rec.detail}</p>
               </div>
             </div>
           ))}

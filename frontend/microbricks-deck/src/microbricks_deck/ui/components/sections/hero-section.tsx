@@ -50,7 +50,7 @@ export function HeroSection() {
         transition={{ delay: 1.5 }}
         className="absolute bottom-8 flex flex-col items-center gap-2 text-muted-foreground"
       >
-        <span className="text-xs">Scroll to explore</span>
+        <span className="text-sm">Scroll to explore</span>
         <motion.div
           animate={{ y: [0, 6, 0] }}
           transition={{ duration: 1.5, repeat: Infinity }}
