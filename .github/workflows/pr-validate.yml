@@ -424,7 +424,7 @@ jobs:
           echo "names=$NAMES" >> "$GITHUB_OUTPUT"
           echo "Changed app names: $NAMES"
 
-      - name: Wait for RUNNING state
+      - name: Wait for ACTIVE state
         env:
           SLUG: ${{ needs.detect-changes.outputs.slug }}
           CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
@@ -435,11 +435,11 @@ jobs:
               STATE=$(databricks apps get "$app-$SLUG" -p hc-dev -o json \
                 | python3 -c 'import json,sys; print(json.load(sys.stdin).get("compute_status",{}).get("state",""))')
               echo "  $app-$SLUG attempt $i/20: state=$STATE"
-              if [[ "$STATE" == "RUNNING" ]]; then
+              if [[ "$STATE" == "ACTIVE" || "$STATE" == "RUNNING" ]]; then
                 break
               fi
               if (( i == 20 )); then
-                echo "::error::$app-$SLUG did not reach RUNNING within 5 minutes"
+                echo "::error::$app-$SLUG did not reach ACTIVE within 5 minutes"
                 exit 1
               fi
               sleep 15

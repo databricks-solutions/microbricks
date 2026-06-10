@@ -77,7 +77,7 @@ jobs:
           apps = data if isinstance(data, list) else data.get("apps", [])
           for app in apps:
               state = app.get("compute_status", {}).get("state", "")
-              if state == "RUNNING":
+              if state in ("RUNNING", "ACTIVE"):
                   print(app["name"])
           ')
           if [[ -z "$APPS" ]]; then
