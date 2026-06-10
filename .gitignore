@@ -80,3 +80,7 @@ docs/diagrams/*.tmp.drawio
 .claude/projects/
 .claude/sessions/
 .claude/cache/
+
+# --- Lock files --- TODO Remove this if not in databricks vpn
+.lock
+.apx/

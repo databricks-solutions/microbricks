@@ -4,13 +4,14 @@ name: deploy-test
 #   - push to release/* (cutting a release branch automatically lands here)
 #   - push to main (the release-PR merge produces a push event on main)
 #
-# `test` is a production-mode bundle (no per-user root_path) on the hc-test
-# profile. Lakebase branches are always `production` here — feature isolation
-# only happens in dev.
+# Two-phase pipeline:
+#   Phase 1 (e2e-verify): ephemeral Lakebase branches + temporary apps validate
+#     that migration scripts and app startup work correctly in isolation.
+#   Phase 2 (deploy): permanent deploy — migrations hit the real production
+#     Lakebase branch, stable apps are deployed.
 #
-# Same migration-then-deploy ordering as deploy-dev. The smoke tests at the
-# end gate the run; a failure here blocks the release from being tagged for
-# prod.
+# Schema evolution scripts run in BOTH phases — first on ephemeral branches
+# (as a gate), then on the production branch (actual schema evolution).
 
 on:
   push:
@@ -103,8 +104,259 @@ jobs:
           fi
           exit $rc
 
-  deploy:
+  # ---------------------------------------------------------------------------
+  # Phase 1: Ephemeral E2E verification.
+  # Deploys temporary apps against isolated Lakebase branches. If migrations or
+  # healthz fail here, the permanent deploy is blocked.
+  # ---------------------------------------------------------------------------
+  e2e-verify:
     needs: [discover, test, test-frontends]
+    runs-on: ubuntu-latest
+    environment:
+      name: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - uses: databricks/setup-cli@main
+        with:
+          version: ${{ env.DATABRICKS_CLI_VERSION }}
+
+      - name: Write hc-test profile to ~/.databrickscfg
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST_TEST }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        run: |
+          mkdir -p "$HOME"
+          cat > "$HOME/.databrickscfg" <<EOF
+          [hc-test]
+          host = ${DATABRICKS_HOST}
+          client_id = ${DATABRICKS_CLIENT_ID}
+          client_secret = ${DATABRICKS_CLIENT_SECRET}
+          EOF
+          chmod 600 "$HOME/.databrickscfg"
+          databricks current-user me -p hc-test
+
+      - name: Compute E2E slug
+        id: slug
+        run: |
+          SLUG=$(./scripts/compute-e2e-slug.sh "${{ github.ref_name }}")
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "E2E slug: $SLUG"
+
+      - name: Ensure Lakebase projects exist (idempotent)
+        env:
+          SERVICE_DIRS: ${{ needs.discover.outputs.service_dirs }}
+        run: |
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
+            ./scripts/lakebase-project-up.sh "$svc" test hc-test
+          done
+
+      - name: Create ephemeral Lakebase branches
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          SERVICE_DIRS: ${{ needs.discover.outputs.service_dirs }}
+        run: |
+          set -euo pipefail
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
+            ./scripts/lakebase-branch-up.sh "$svc" "$SLUG" hc-test
+          done
+
+      - name: Run migrations against ephemeral branches
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          SERVICE_DIRS: ${{ needs.discover.outputs.service_dirs }}
+        run: |
+          set -euo pipefail
+          export PGUSER=$(databricks current-user me -p hc-test -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
+            echo "→ Migrating $svc against ephemeral branch $SLUG"
+            cd "services/$svc"
+            ENDPOINT="projects/$svc/branches/$SLUG/endpoints/primary"
+            HOST=$(databricks postgres get-endpoint "$ENDPOINT" -p hc-test -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["hosts"]["host"])')
+            export PGHOST="$HOST"
+            export PGPORT=5432
+            export PGDATABASE=databricks_postgres
+            export PGSSLMODE=require
+            export ENDPOINT_NAME="$ENDPOINT"
+            uv sync --all-groups
+            uv run alembic upgrade head
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('frontend/*/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install apx CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build all frontend UIs
+        run: ./scripts/build-frontends.sh
+
+      - name: Upload frontend build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-builds
+          path: frontend/*/src/*/__dist__/
+          retention-days: 1
+
+      - name: Deploy ephemeral apps (e2e-test target)
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          databricks bundle deploy -t e2e-test \
+            --var "app_name_suffix=-$SLUG" \
+            --var "lakebase_branch=$SLUG"
+
+      - name: Run ephemeral apps
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          ALL_BUNDLE_KEYS: ${{ needs.discover.outputs.all_bundle_keys }}
+        run: |
+          set -euo pipefail
+          LOG_DIR=$(mktemp -d)
+          mapfile -t KEYS < <(echo "$ALL_BUNDLE_KEYS" | jq -r '.[]')
+          PIDS=()
+          for KEY in "${KEYS[@]}"; do
+            ( databricks bundle run -t e2e-test "$KEY" \
+                --var "app_name_suffix=-$SLUG" \
+                --var "lakebase_branch=$SLUG"
+            ) > "$LOG_DIR/$KEY.log" 2>&1 &
+            PID=$!
+            PIDS+=("$PID")
+            echo "→ kicked $KEY (pid=$PID)"
+          done
+          FAIL=0
+          for i in "${!KEYS[@]}"; do
+            KEY="${KEYS[$i]}"
+            if wait "${PIDS[$i]}"; then
+              echo "✓ $KEY"
+              tail -3 "$LOG_DIR/$KEY.log" | sed 's/^/    /'
+            else
+              echo "::error::$KEY failed; full log:"
+              cat "$LOG_DIR/$KEY.log"
+              FAIL=1
+            fi
+          done
+          rm -rf "$LOG_DIR"
+          (( FAIL == 0 )) || exit 1
+
+      - name: Wait for RUNNING state (ephemeral apps)
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          ALL_APP_NAMES: ${{ needs.discover.outputs.all_app_names }}
+        run: |
+          set -euo pipefail
+          for app in $(echo "$ALL_APP_NAMES" | jq -r '.[]'); do
+            for i in $(seq 1 20); do
+              STATE=$(databricks apps get "$app-$SLUG" -p hc-test -o json \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("app_status",{}).get("state",""))')
+              echo "  $app-$SLUG attempt $i/20: state=$STATE"
+              if [[ "$STATE" == "RUNNING" ]]; then
+                break
+              fi
+              if (( i == 20 )); then
+                echo "::error::$app-$SLUG did not reach RUNNING within 5 minutes"
+                exit 1
+              fi
+              sleep 15
+            done
+          done
+
+      - name: Smoke-test ephemeral apps
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          SERVICES_JSON: ${{ needs.discover.outputs.services_json }}
+          FRONTENDS_JSON: ${{ needs.discover.outputs.frontends_json }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          assert_healthz() {
+            local app="$1" path="$2"
+            local url body_file http_code body
+            url=$(databricks apps get "$app" -p hc-test -o json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+            if [[ -z "$url" ]]; then
+              echo "::error::$app has no URL"
+              return 1
+            fi
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 30 \
+              -H "Authorization: Bearer $TOKEN" \
+              "$url$path")
+            body=$(cat "$body_file"); rm -f "$body_file"
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::$app $path -> HTTP $http_code (expected 200)"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            if [[ "$body" != '{"ok":true}' ]]; then
+              echo "::error::$app $path -> 200 but body mismatch:"
+              echo "  body (first 300 chars): $(printf '%s' "$body" | head -c 300)"
+              return 1
+            fi
+            echo "✓ $app $path -> 200 $body"
+          }
+          FAIL=0
+          for row in $(echo "$SERVICES_JSON" | jq -c '.[]'); do
+            app=$(echo "$row" | jq -r '.app_name')
+            healthz=$(echo "$row" | jq -r '.healthz')
+            assert_healthz "$app-$SLUG" "$healthz" || FAIL=1
+          done
+          for row in $(echo "$FRONTENDS_JSON" | jq -c '.[]'); do
+            app=$(echo "$row" | jq -r '.app_name')
+            healthz=$(echo "$row" | jq -r '.healthz')
+            assert_healthz "$app-$SLUG" "$healthz" || FAIL=1
+          done
+          (( FAIL == 0 )) || exit 1
+
+      - name: Tear down ephemeral apps
+        if: always()
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          set +e
+          databricks bundle destroy -t e2e-test \
+            --var "app_name_suffix=-$SLUG" \
+            --var "lakebase_branch=$SLUG" \
+            --auto-approve
+          exit 0
+
+      - name: Tear down ephemeral Lakebase branches
+        if: always()
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          SERVICE_DIRS: ${{ needs.discover.outputs.service_dirs }}
+        run: |
+          for svc in $(echo "$SERVICE_DIRS" | jq -r '.[]'); do
+            ./scripts/lakebase-branch-down.sh "$svc" "$SLUG" hc-test
+          done
+
+  # ---------------------------------------------------------------------------
+  # Phase 2: Permanent deploy.
+  # Migrations run against the real production Lakebase branch, stable apps are
+  # deployed. Only runs if Phase 1 (e2e-verify) passes.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: [discover, e2e-verify]
     runs-on: ubuntu-latest
     environment:
       name: test
@@ -174,14 +426,17 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('frontend/*/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
+      - name: Download frontend build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-builds
+          path: frontend/
+
       - name: Install apx CLI
         run: |
           set -euo pipefail
           curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Build all frontend UIs
-        run: ./scripts/build-frontends.sh
 
       - name: bundle deploy
         run: databricks bundle deploy -t test

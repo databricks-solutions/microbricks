@@ -1,0 +1,12 @@
+command:
+  - "uvicorn"
+  - "microbricks_deck.backend.app:app"
+  - "--workers"
+  - "2"
+
+env:
+  - name: SERVICE_NAME
+    value: "microbricks-deck"
+
+  - name: PYTHONPATH
+    value: "src"

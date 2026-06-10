@@ -41,8 +41,8 @@ PROFILE="${3:-hc-dev}"
 # Allow callers to pass either the bare slug ("hc-123-foo") or the prefixed
 # form ("feat-hc-123-foo"); normalize to the prefixed form here.
 case "$SLUG" in
-  feat-*|hotfix-*) BRANCH="$SLUG" ;;
-  *)               BRANCH="feat-$SLUG" ;;
+  feat-*|hotfix-*|e2e-*|pr-*) BRANCH="$SLUG" ;;
+  *)                          BRANCH="feat-$SLUG" ;;
 esac
 
 # Project name is just `<svc>` (no `${bundle.target}` suffix) — the contract
