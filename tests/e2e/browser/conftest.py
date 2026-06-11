@@ -26,8 +26,13 @@ def app_url() -> str:
 
 
 @pytest.fixture(scope="session")
-def lakebase_branch() -> str | None:
-    return os.environ.get("LAKEBASE_BRANCH")
+def lakebase_branch() -> str:
+    branch = os.environ.get("LAKEBASE_BRANCH")
+    if not branch:
+        pytest.skip(
+            "LAKEBASE_BRANCH not set; browser e2e tests require an isolated branch"
+        )
+    return branch
 
 
 @pytest.fixture(scope="session")
@@ -49,15 +54,12 @@ def browser_context_args(user_token: str) -> dict:
 
 
 @pytest.fixture(autouse=True)
-def _inject_branch_param(context: BrowserContext, lakebase_branch: str | None):
+def _inject_branch_param(context: BrowserContext, lakebase_branch: str):
     """Intercept all /api/* requests and append ?branch_name=<slug>.
 
     This ensures the BFF forwards requests to the correct Lakebase branch
     even when the app itself wasn't redeployed with a slug.
     """
-    if not lakebase_branch:
-        yield
-        return
 
     def _append_branch(route: Route):
         request = route.request
