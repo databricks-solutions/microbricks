@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .db import close_all_pools
-from .routers import patients
+from .routers import addresses, patients
 
 
 @asynccontextmanager
@@ -24,6 +24,7 @@ app = FastAPI(
 )
 
 app.include_router(patients.router, prefix="/api/v1")
+app.include_router(addresses.router, prefix="/api/v1")
 
 
 @app.get("/api/v1/healthz")
