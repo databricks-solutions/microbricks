@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from functools import cached_property
 from uuid import UUID
 
 from fastapi import Request
 from strawberry.dataloader import DataLoader
+from strawberry.fastapi.context import BaseContext
 
 from ...clients import (
     Appointment,
@@ -25,11 +25,12 @@ from ...clients import (
 )
 
 
-@dataclass
-class BFFGraphQLContext:
-    user_token: str
-    branch: str | None
-    request: Request
+class BFFGraphQLContext(BaseContext):
+    def __init__(self, *, user_token: str, branch: str | None, request: Request):
+        super().__init__()
+        self.user_token = user_token
+        self.branch = branch
+        self.request = request
 
     @cached_property
     def patient_loader(self) -> DataLoader[UUID, Patient | None]:
