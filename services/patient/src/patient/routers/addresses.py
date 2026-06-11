@@ -223,3 +223,4 @@ async def delete_address(
         if cur.rowcount == 0:
             raise HTTPException(404, "Address not found")
         await conn.commit()
+
