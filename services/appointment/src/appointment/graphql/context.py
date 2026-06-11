@@ -7,7 +7,7 @@ from fastapi import Request
 from psycopg_pool import AsyncConnectionPool
 
 from ..auth import branch_name, user_email, user_token
-from ..db import get_pool
+from ..db import OAuthConnection, get_pool
 
 
 @dataclass
@@ -17,7 +17,7 @@ class GraphQLContext:
     branch: str | None
     request: Request
 
-    async def pool(self) -> AsyncConnectionPool:
+    async def pool(self) -> AsyncConnectionPool[OAuthConnection]:
         return await get_pool(self.user_email, self.user_token, self.branch)
 
 
