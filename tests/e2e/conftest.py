@@ -39,17 +39,21 @@ def user_one_token() -> str:
 
 
 @pytest.fixture(scope="session")
-def lakebase_branch() -> str | None:
-    """Lakebase branch for routing. None means use the app's default."""
-    return os.environ.get("LAKEBASE_BRANCH")
+def lakebase_branch() -> str:
+    """Lakebase branch for routing — required to avoid polluting production data."""
+    branch = os.environ.get("LAKEBASE_BRANCH")
+    if not branch:
+        pytest.skip(
+            "LAKEBASE_BRANCH not set; e2e tests require an isolated branch "
+            "to avoid writing test data to the production Lakebase"
+        )
+    return branch
 
 
 @pytest.fixture(scope="session")
-def branch_params(lakebase_branch: str | None) -> dict[str, str]:
+def branch_params(lakebase_branch: str) -> dict[str, str]:
     """Query params to inject branch routing into every request."""
-    if lakebase_branch:
-        return {"branch_name": lakebase_branch}
-    return {}
+    return {"branch_name": lakebase_branch}
 
 
 @pytest.fixture(scope="session")
