@@ -15,7 +15,7 @@ async def test_pagination_returns_different_pages(
 ):
     # Ensure at least 3 patients exist
     for i in range(3):
-        await patient_svc_client.post(
+        r = await patient_svc_client.post(
             "/api/v1/patients",
             json={
                 "given_name": f"E2E-Page-{uuid.uuid4().hex[:6]}",
@@ -24,6 +24,7 @@ async def test_pagination_returns_different_pages(
                 "sex_at_birth": "other",
             },
         )
+        assert r.status_code == 201, f"Create patient failed: {r.status_code} {r.text}"
 
     # Page 1
     r = await bff_client.get("/api/bff/patients", params={"limit": 2, "offset": 0})

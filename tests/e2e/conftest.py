@@ -88,11 +88,11 @@ async def bff_client(
 
 @pytest.fixture
 async def patient_svc_client(
-    patient_svc_base_url: str, user_one_token: str, branch_params: dict[str, str]
+    patient_svc_base_url: str, auth_headers: dict[str, str], branch_params: dict[str, str]
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     async with httpx.AsyncClient(
         base_url=patient_svc_base_url,
-        headers={"X-Forwarded-Access-Token": user_one_token},
+        headers=auth_headers,
         params=branch_params,
         timeout=30.0,
     ) as client:
@@ -101,11 +101,11 @@ async def patient_svc_client(
 
 @pytest.fixture
 async def appointment_svc_client(
-    appointment_svc_base_url: str, user_one_token: str, branch_params: dict[str, str]
+    appointment_svc_base_url: str, auth_headers: dict[str, str], branch_params: dict[str, str]
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     async with httpx.AsyncClient(
         base_url=appointment_svc_base_url,
-        headers={"X-Forwarded-Access-Token": user_one_token},
+        headers=auth_headers,
         params=branch_params,
         timeout=30.0,
     ) as client:
