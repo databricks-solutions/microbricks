@@ -523,6 +523,88 @@ jobs:
           done
           (( FAIL == 0 )) || exit 1
 
+      - name: Run E2E API tests
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+          FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
+          CHANGED_FRONTENDS: ${{ needs.detect-changes.outputs.changed_frontends }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
+        run: |
+          set -euo pipefail
+
+          # Acquire a service principal token
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+          # Helper: resolve app URL — use slugged app if it was deployed,
+          # otherwise fall back to the standard (non-slugged) app.
+          resolve_url() {
+            local app_name="$1" dir_name="$2"
+            local target_app="$app_name"
+            # Check if this service/frontend was deployed with a slug
+            if echo "$CHANGED_SERVICES" | jq -e --arg d "$dir_name" 'index($d)' >/dev/null 2>&1 \
+               || echo "$CHANGED_FRONTENDS" | jq -e --arg d "$dir_name" 'index($d)' >/dev/null 2>&1; then
+              target_app="$app_name-$SLUG"
+            fi
+            databricks apps get "$target_app" -p "$DB_PROFILE" -o json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))'
+          }
+
+          PORTAL=$(echo "$FRONTENDS_JSON" | jq -r '.[] | select(.dir == "hc-portal") | .app_name')
+          export BFF_BASE_URL=$(resolve_url "$PORTAL" "hc-portal")
+          export PATIENT_SVC_BASE_URL=$(resolve_url "patient" "patient")
+          export APPOINTMENT_SVC_BASE_URL=$(resolve_url "appointment" "appointment")
+          export USER_ONE_TOKEN="$TOKEN"
+          # Branch routing: when hitting a non-slugged app, pass branch_name
+          # so requests route to the PR's Lakebase branch
+          export LAKEBASE_BRANCH="$SLUG"
+
+          uv sync --all-groups
+          uv run pytest tests/e2e/ -m "e2e" -v --tb=short
+
+      - name: Install Playwright browsers
+        run: uv run playwright install chromium --with-deps
+
+      - name: Run E2E browser tests
+        env:
+          SLUG: ${{ needs.detect-changes.outputs.slug }}
+          FRONTENDS_JSON: ${{ needs.detect-changes.outputs.frontends_json }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changed_services }}
+          CHANGED_FRONTENDS: ${{ needs.detect-changes.outputs.changed_frontends }}
+          DB_PROFILE: ${{ needs.detect-changes.outputs.db_profile }}
+        run: |
+          set -euo pipefail
+
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+          resolve_url() {
+            local app_name="$1" dir_name="$2"
+            local target_app="$app_name"
+            if echo "$CHANGED_SERVICES" | jq -e --arg d "$dir_name" 'index($d)' >/dev/null 2>&1 \
+               || echo "$CHANGED_FRONTENDS" | jq -e --arg d "$dir_name" 'index($d)' >/dev/null 2>&1; then
+              target_app="$app_name-$SLUG"
+            fi
+            databricks apps get "$target_app" -p "$DB_PROFILE" -o json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))'
+          }
+
+          PORTAL=$(echo "$FRONTENDS_JSON" | jq -r '.[] | select(.dir == "hc-portal") | .app_name')
+          export BFF_BASE_URL=$(resolve_url "$PORTAL" "hc-portal")
+          export USER_ONE_TOKEN="$TOKEN"
+          export LAKEBASE_BRANCH="$SLUG"
+
+          uv run pytest tests/e2e/browser/ -m "e2e_browser" -v --tb=short
+
       - name: Collect preview app URLs
         id: urls
         env:

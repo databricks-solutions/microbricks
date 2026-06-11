@@ -25,9 +25,17 @@ package = false
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
     "psycopg[binary]>=3.2.11",
     "databricks-sdk>=0.74.0",
+    "httpx>=0.27.0",
+    "pytest-playwright>=0.5.2",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end API tests requiring deployed apps",
+    "e2e_browser: end-to-end browser tests requiring deployed apps and Playwright",
+]
