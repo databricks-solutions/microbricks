@@ -328,6 +328,53 @@ jobs:
           done
           (( FAIL == 0 )) || exit 1
 
+      - name: Run E2E API tests
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          SERVICES_JSON: ${{ needs.discover.outputs.services_json }}
+          FRONTENDS_JSON: ${{ needs.discover.outputs.frontends_json }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          PORTAL=$(echo "$FRONTENDS_JSON" | jq -r '.[] | select(.dir == "hc-portal") | .app_name')
+          export BFF_BASE_URL=$(databricks apps get "$PORTAL-$SLUG" -p hc-test -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          export PATIENT_SVC_BASE_URL=$(databricks apps get "patient-$SLUG" -p hc-test -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          export APPOINTMENT_SVC_BASE_URL=$(databricks apps get "appointment-$SLUG" -p hc-test -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          export USER_ONE_TOKEN="$TOKEN"
+          export LAKEBASE_BRANCH="$SLUG"
+          uv sync --all-groups
+          uv run pytest tests/e2e/ -m "e2e" -v --tb=short
+
+      - name: Install Playwright browsers
+        run: uv run playwright install chromium --with-deps
+
+      - name: Run E2E browser tests
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          FRONTENDS_JSON: ${{ needs.discover.outputs.frontends_json }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS --fail \
+            -u "$DATABRICKS_CLIENT_ID:$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode 'scope=all-apis' \
+            "$DATABRICKS_HOST/oidc/v1/token" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          PORTAL=$(echo "$FRONTENDS_JSON" | jq -r '.[] | select(.dir == "hc-portal") | .app_name')
+          export BFF_BASE_URL=$(databricks apps get "$PORTAL-$SLUG" -p hc-test -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))')
+          export USER_ONE_TOKEN="$TOKEN"
+          export LAKEBASE_BRANCH="$SLUG"
+          uv run pytest tests/e2e/browser/ -m "e2e_browser" -v --tb=short
+
       - name: Tear down ephemeral apps
         if: always()
         env:
