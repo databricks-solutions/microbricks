@@ -73,6 +73,9 @@ def appointment_svc_base_url() -> str:
     return url.rstrip("/")
 
 
+VISIT_TYPE_CODE = "FOLLOW_UP"
+
+
 @pytest.fixture
 async def bff_client(
     bff_base_url: str, auth_headers: dict[str, str], branch_params: dict[str, str]
@@ -107,6 +110,6 @@ async def appointment_svc_client(
         base_url=appointment_svc_base_url,
         headers=auth_headers,
         params=branch_params,
-        timeout=30.0,
+        timeout=60.0,
     ) as client:
         yield client

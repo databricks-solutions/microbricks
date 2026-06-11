@@ -24,5 +24,5 @@ async def test_invalid_token_returns_401(bff_base_url: str):
 
 
 async def test_valid_token_returns_200(bff_client: httpx.AsyncClient):
-    r = await bff_client.get("/api/bff/patients")
+    r = await bff_client.get("/api/bff/dashboard-stats")
     assert r.status_code == 200

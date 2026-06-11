@@ -30,7 +30,7 @@ async def test_create_patient_and_read_via_bff(
 
     # Read back via BFF patients list (search by unique name)
     r = await bff_client.get("/api/bff/patients", params={"q": unique_name})
-    assert r.status_code == 200
+    assert r.status_code == 200, f"BFF patients list failed: {r.status_code} {r.text}"
     page = r.json()
     assert page["total"] >= 1
     found_ids = {p["id"] for p in page["items"]}
