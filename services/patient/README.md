@@ -32,6 +32,7 @@ curl -H "X-Forwarded-Access-Token: $(databricks auth token -p hc-dev | jq -r .ac
 ```
 
 See:
+
 - [Architecture](../../ARCHITECTURE.md)
 - [Data model](../../HEALTHCARE_DATA_MODEL.md#1-patient-svc--patient_db)
 - [Contributing](../../CONTRIBUTING.md)
@@ -59,6 +60,7 @@ tests/
 
 seed/
 └── seed.py                # Idempotent synthetic-data loader for dev (~50 patients).
+
 ```
 
 ## Seeding
@@ -72,6 +74,5 @@ make seed-dev                        # all six services in dependency order
 ```
 
 `seed/seed.py` populates `patient`, `patient_address`, and `patient_consent`
-with `~50` deterministic synthetic rows. Re-running is safe (`ON CONFLICT
-(id) DO NOTHING`). See [`scripts/seeds/_common.py`](../../scripts/seeds/_common.py)
+with `~50` deterministic synthetic rows. Re-running is safe (`ON CONFLICT (id) DO NOTHING`). See `[scripts/seeds/_common.py](../../scripts/seeds/_common.py)`
 for the shared helpers + cross-service ID derivation.
