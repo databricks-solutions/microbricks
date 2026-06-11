@@ -351,13 +351,12 @@ def test_patient_summary_partial_failure():
     assert data["recentLabOrders"] == []
 
 
-# --- Introspection without auth still works (Strawberry serves schema) ---
+# --- Missing auth token returns 401 ---
 
 
-def test_graphql_introspection_without_token():
+def test_graphql_missing_token_returns_401():
     r = client.post(
         "/api/graphql",
         json={"query": "{ __schema { queryType { name } } }"},
     )
-    assert r.status_code == 200
-    assert r.json()["data"]["__schema"]["queryType"]["name"] == "Query"
+    assert r.status_code == 401
