@@ -11,6 +11,11 @@ async def version():
     return VersionOut.from_metadata()
 
 
+@router.get("/healthz", operation_id="healthz")
+async def healthz():
+    return {"ok": True}
+
+
 @router.get("/current-user", response_model=UserOut, operation_id="currentUser")
 def me(user_ws: Dependencies.UserClient):
     return user_ws.current_user.me()

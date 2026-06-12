@@ -221,6 +221,58 @@ export function useHandle_http_post_api_graphql_post(options?: {
         ...options?.mutation
     });
 }
+export const healthz = async (options?: RequestInit): Promise<{
+    data: unknown;
+}> =>{
+    const res = await fetch("/api/healthz", {
+        ...options,
+        method: "GET"
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const healthzKey = ()=>{
+    return [
+        "/api/healthz"
+    ] as const;
+};
+export function useHealthz<TData = {
+    data: unknown;
+}>(options?: {
+    query?: Omit<UseQueryOptions<{
+        data: unknown;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: healthzKey(),
+        queryFn: ()=>healthz(),
+        ...options?.query
+    });
+}
+export function useHealthzSuspense<TData = {
+    data: unknown;
+}>(options?: {
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: unknown;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: healthzKey(),
+        queryFn: ()=>healthz(),
+        ...options?.query
+    });
+}
 export const version = async (options?: RequestInit): Promise<{
     data: VersionOut;
 }> =>{

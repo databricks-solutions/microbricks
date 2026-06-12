@@ -26,6 +26,7 @@ app-name = "hc-portal"
 app-slug = "hc_portal"
 app-entrypoint = "hc_portal.backend.app:app"
 api-prefix = "/api"
+healthz = "/api/healthz"
 metadata-path = "src/hc_portal/_metadata.py"
 
 [tool.apx.ui]

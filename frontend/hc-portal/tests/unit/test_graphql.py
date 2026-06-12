@@ -354,7 +354,8 @@ def test_patient_summary_partial_failure():
 # --- Missing auth token returns 401 ---
 
 
-def test_graphql_missing_token_returns_401():
+def test_graphql_missing_token_returns_401(monkeypatch):
+    monkeypatch.delenv("LOCAL_DEV_TOKEN", raising=False)
     r = client.post(
         "/api/graphql",
         json={"query": "{ __schema { queryType { name } } }"},
