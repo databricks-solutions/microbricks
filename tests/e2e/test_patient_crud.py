@@ -1,4 +1,4 @@
-"""E2E: Patient CRUD — create via service, read back through BFF."""
+"""E2E: Patient CRUD — create via service, read back through BFF GraphQL."""
 from __future__ import annotations
 
 import uuid
@@ -7,6 +7,28 @@ import httpx
 import pytest
 
 pytestmark = pytest.mark.e2e
+
+PATIENTS_SEARCH_QUERY = """
+    query Patients($q: String!, $limit: Int!, $offset: Int!) {
+        patients(q: $q, limit: $limit, offset: $offset) {
+            items { id givenName familyName }
+            total
+        }
+    }
+"""
+
+PATIENT_SUMMARY_QUERY = """
+    query PatientSummary($id: UUID!) {
+        patientSummary(id: $id) {
+            patient { id givenName familyName }
+            lastAppointments { id }
+            activePrescriptions { id }
+            recentLabOrders { id }
+            outstandingInvoices { id }
+            partial
+        }
+    }
+"""
 
 
 async def test_create_patient_and_read_via_bff(
@@ -28,10 +50,18 @@ async def test_create_patient_and_read_via_bff(
     patient_id = patient["id"]
     assert patient["given_name"] == unique_name
 
-    # Read back via BFF patients list (search by unique name)
-    r = await bff_client.get("/api/bff/patients", params={"q": unique_name})
-    assert r.status_code == 200, f"BFF patients list failed: {r.status_code} {r.text}"
-    page = r.json()
+    # Read back via BFF GraphQL patients query (search by unique name)
+    r = await bff_client.post(
+        "/api/graphql",
+        json={
+            "query": PATIENTS_SEARCH_QUERY,
+            "variables": {"q": unique_name, "limit": 10, "offset": 0},
+        },
+    )
+    assert r.status_code == 200, f"BFF GraphQL failed: {r.status_code} {r.text}"
+    body = r.json()
+    assert "errors" not in body, f"GraphQL errors: {body.get('errors')}"
+    page = body["data"]["patients"]
     assert page["total"] >= 1
     found_ids = {p["id"] for p in page["items"]}
     assert patient_id in found_ids
@@ -53,17 +83,30 @@ async def test_patient_summary_returns_full_view(
     assert r.status_code == 201
     patient_id = r.json()["id"]
 
-    # Patient summary aggregates data from multiple services
-    r = await bff_client.get(f"/api/bff/patient-summary/{patient_id}")
+    # Patient summary via GraphQL
+    r = await bff_client.post(
+        "/api/graphql",
+        json={"query": PATIENT_SUMMARY_QUERY, "variables": {"id": patient_id}},
+    )
     assert r.status_code == 200
-    summary = r.json()
+    body = r.json()
+    assert "errors" not in body, f"GraphQL errors: {body.get('errors')}"
+    summary = body["data"]["patientSummary"]
     assert summary["patient"]["id"] == patient_id
-    assert summary["patient"]["given_name"] == unique_name
+    assert summary["patient"]["givenName"] == unique_name
 
 
-async def test_get_nonexistent_patient_returns_404(
+async def test_get_nonexistent_patient_returns_null(
     bff_client: httpx.AsyncClient,
 ):
     fake_id = str(uuid.uuid4())
-    r = await bff_client.get(f"/api/bff/patient-summary/{fake_id}")
-    assert r.status_code in (404, 502)
+    r = await bff_client.post(
+        "/api/graphql",
+        json={"query": PATIENT_SUMMARY_QUERY, "variables": {"id": fake_id}},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Either returns null patient or has errors — both are valid
+    summary = body["data"]["patientSummary"]
+    if summary is not None:
+        assert summary["patient"] is None or "errors" in body

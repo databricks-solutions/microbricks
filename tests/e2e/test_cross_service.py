@@ -15,6 +15,28 @@ from tests.e2e.conftest import VISIT_TYPE_CODE
 
 pytestmark = pytest.mark.e2e
 
+PATIENT_SUMMARY_QUERY = """
+    query PatientSummary($id: UUID!) {
+        patientSummary(id: $id) {
+            patient { id givenName familyName }
+            lastAppointments { id }
+            partial
+        }
+    }
+"""
+
+APPOINTMENTS_QUERY = """
+    query Appointments($patientId: UUID, $limit: Int!, $offset: Int!) {
+        appointments(patientId: $patientId, limit: $limit, offset: $offset) {
+            items {
+                id
+                patient { givenName familyName }
+            }
+            total
+        }
+    }
+"""
+
 
 def _check_appointment_response(r: httpx.Response) -> None:
     """Skip test if appointment service DB isn't seeded with visit types."""
@@ -59,12 +81,17 @@ async def test_appointment_appears_in_patient_summary(
     appointment_id = r.json()["id"]
 
     # 3. Verify patient-summary includes this appointment
-    r = await bff_client.get(f"/api/bff/patient-summary/{patient_id}")
+    r = await bff_client.post(
+        "/api/graphql",
+        json={"query": PATIENT_SUMMARY_QUERY, "variables": {"id": patient_id}},
+    )
     assert r.status_code == 200
-    summary = r.json()
+    body = r.json()
+    assert "errors" not in body, f"GraphQL errors: {body.get('errors')}"
+    summary = body["data"]["patientSummary"]
     assert summary["patient"]["id"] == patient_id
 
-    appointment_ids = [a["id"] for a in summary.get("last_appointments", [])]
+    appointment_ids = [a["id"] for a in summary.get("lastAppointments", [])]
     assert appointment_id in appointment_ids, (
         f"Appointment {appointment_id} not found in patient-summary. "
         f"Got: {appointment_ids}"
@@ -105,10 +132,19 @@ async def test_appointment_list_enriches_patient_name(
     _check_appointment_response(r)
     assert r.status_code == 201
 
-    # BFF appointments list should enrich with patient_name
-    r = await bff_client.get("/api/bff/appointments", params={"patient_id": patient_id})
+    # BFF appointments query should resolve nested patient name
+    r = await bff_client.post(
+        "/api/graphql",
+        json={
+            "query": APPOINTMENTS_QUERY,
+            "variables": {"patientId": patient_id, "limit": 10, "offset": 0},
+        },
+    )
     assert r.status_code == 200
-    page = r.json()
+    body = r.json()
+    assert "errors" not in body, f"GraphQL errors: {body.get('errors')}"
+    page = body["data"]["appointments"]
     assert page["total"] >= 1
     first = page["items"][0]
-    assert "patient_name" in first or "patient_id" in first
+    assert first["patient"]["givenName"] == unique_name
+    assert first["patient"]["familyName"] == "EnrichTest"
