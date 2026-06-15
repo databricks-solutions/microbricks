@@ -31,7 +31,7 @@
     "devDependencies": {
         "@graphql-codegen/cli": "^7.1.2",
         "@graphql-codegen/client-preset": "^6.0.1",
-        "@opentelemetry/api-logs": "^0.218.0",
+        "@opentelemetry/api-logs": "^0.219.0",
         "@opentelemetry/exporter-logs-otlp-http": "^0.218.0",
         "@opentelemetry/resources": "^2.7.1",
         "@opentelemetry/sdk-logs": "^0.218.0",
