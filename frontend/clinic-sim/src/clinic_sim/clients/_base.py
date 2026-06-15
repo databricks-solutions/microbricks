@@ -10,11 +10,36 @@ from __future__ import annotations
 
 import functools
 import os
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
 _OWN_APP_PREFIX = "clinic-sim"
+
+
+class GraphQLError(Exception):
+    """Raised when a downstream GraphQL endpoint returns errors."""
+
+    def __init__(self, errors: list[dict], data: dict | None = None):
+        self.errors = errors
+        self.data = data
+        messages = "; ".join(e.get("message", "unknown") for e in errors)
+        super().__init__(f"GraphQL errors: {messages}")
+
+
+def _to_camel(snake: str) -> str:
+    parts = snake.split("_")
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+def _camel_keys(obj: Any) -> Any:
+    """Recursively convert dict keys from snake_case to camelCase."""
+    if isinstance(obj, dict):
+        return {_to_camel(k): _camel_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_camel_keys(item) for item in obj]
+    return obj
 
 
 @functools.lru_cache(maxsize=1)
@@ -65,3 +90,15 @@ class _BaseSvcClient:
 
     async def __aexit__(self, *exc):
         await self._client.aclose()
+
+    async def _graphql(self, query: str, variables: dict | None = None) -> dict:
+        """Execute a GraphQL operation against /api/graphql."""
+        body: dict = {"query": query}
+        if variables:
+            body["variables"] = variables
+        r = await self._client.post("/api/graphql", json=body)
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("errors"):
+            raise GraphQLError(payload["errors"], payload.get("data"))
+        return payload["data"]

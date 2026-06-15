@@ -260,7 +260,7 @@ async def _run_one_journey(
             patient_name = f"{payload.given_name} {payload.family_name}"
             result, info = await _emit_call(
                 ctx, journey_id, "reception", patient_name, None,
-                "patient", "POST /patients",
+                "patient", "mutation createPatient",
                 ctx.patient_client.create(payload),
             )
             if not info.ok or result is None:
@@ -302,7 +302,7 @@ async def _run_one_journey(
 
         appt, info = await _emit_call(
             ctx, journey_id, "waiting", patient_name, str(patient_id),
-            "appointment", "POST /appointments",
+            "appointment", "mutation createAppointment",
             ctx.appointment_client.create(AppointmentCreatePayload(
                 patient_id=patient_id,
                 provider_id=provider_id,
@@ -325,7 +325,7 @@ async def _run_one_journey(
         # Stage 4: arrived.
         _, info = await _emit_call(
             ctx, journey_id, "waiting", patient_name, str(patient_id),
-            "appointment", "PATCH /appointments/{id}/status=arrived",
+            "appointment", "mutation updateAppointmentStatus(arrived)",
             ctx.appointment_client.update_status(appt.id, "arrived"),
         )
         if not info.ok:
@@ -340,7 +340,7 @@ async def _run_one_journey(
         # Stage 5: in progress (in exam room).
         _, info = await _emit_call(
             ctx, journey_id, "exam", patient_name, str(patient_id),
-            "appointment", "PATCH /appointments/{id}/status=in_progress",
+            "appointment", "mutation updateAppointmentStatus(in_progress)",
             ctx.appointment_client.update_status(appt.id, "in_progress"),
         )
         if not info.ok:
@@ -357,7 +357,7 @@ async def _run_one_journey(
             panel = random.choice(LAB_PANEL_CODES)
             lab_order, info = await _emit_call(
                 ctx, journey_id, "lab", patient_name, str(patient_id),
-                "lab", f"POST /lab-orders ({panel})",
+                "lab", f"mutation createLabOrder({panel})",
                 ctx.lab_client.create_order(LabOrderCreatePayload(
                     patient_id=patient_id,
                     ordering_provider_id=provider_id,
@@ -369,12 +369,12 @@ async def _run_one_journey(
                 # Mark collected and resulted in quick succession.
                 await _emit_call(
                     ctx, journey_id, "lab", patient_name, str(patient_id),
-                    "lab", "PATCH /lab-orders/{id}/status=collected",
+                    "lab", "mutation updateLabOrderStatus(collected)",
                     ctx.lab_client.update_order_status(lab_order.id, "collected"),
                 )
                 await _emit_call(
                     ctx, journey_id, "lab", patient_name, str(patient_id),
-                    "lab", "PATCH /lab-orders/{id}/status=resulted",
+                    "lab", "mutation updateLabOrderStatus(resulted)",
                     ctx.lab_client.update_order_status(lab_order.id, "resulted"),
                 )
 
@@ -383,7 +383,7 @@ async def _run_one_journey(
             med_code, dose = random.choice(MEDICATION_CODES)
             await _emit_call(
                 ctx, journey_id, "pharmacy", patient_name, str(patient_id),
-                "prescription", f"POST /prescriptions ({med_code})",
+                "prescription", f"mutation createPrescription({med_code})",
                 ctx.rx_client.create(PrescriptionCreatePayload(
                     patient_id=patient_id,
                     prescribing_provider_id=provider_id,
@@ -397,7 +397,7 @@ async def _run_one_journey(
         # Stage 8: complete the appointment.
         await _emit_call(
             ctx, journey_id, "checkout", patient_name, str(patient_id),
-            "appointment", "PATCH /appointments/{id}/status=completed",
+            "appointment", "mutation updateAppointmentStatus(completed)",
             ctx.appointment_client.update_status(appt.id, "completed"),
         )
 
@@ -405,7 +405,7 @@ async def _run_one_journey(
         amount = random.randint(75_00, 450_00)
         invoice, info = await _emit_call(
             ctx, journey_id, "checkout", patient_name, str(patient_id),
-            "billing", f"POST /invoices (${amount/100:.2f})",
+            "billing", f"mutation createInvoice(${amount/100:.2f})",
             ctx.billing_client.create_invoice(InvoiceCreatePayload(
                 patient_id=patient_id,
                 appointment_id=appt.id,
@@ -416,12 +416,12 @@ async def _run_one_journey(
         if info.ok and invoice is not None:
             await _emit_call(
                 ctx, journey_id, "checkout", patient_name, str(patient_id),
-                "billing", "PATCH /invoices/{id}/status=sent",
+                "billing", "mutation updateInvoiceStatus(sent)",
                 ctx.billing_client.update_invoice_status(invoice.id, "sent"),
             )
             await _emit_call(
                 ctx, journey_id, "checkout", patient_name, str(patient_id),
-                "billing", "PATCH /invoices/{id}/status=paid",
+                "billing", "mutation updateInvoiceStatus(paid)",
                 ctx.billing_client.update_invoice_status(invoice.id, "paid"),
             )
 
