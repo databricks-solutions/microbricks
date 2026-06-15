@@ -140,7 +140,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: uv sync (service)
         working-directory: services/${{ matrix.service }}
@@ -179,7 +179,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: uv sync (BFF)
         working-directory: frontend/${{ matrix.frontend }}
@@ -259,7 +259,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: Install Databricks CLI
         uses: databricks/setup-cli@main
