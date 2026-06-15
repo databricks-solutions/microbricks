@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import { FlaskConical, Search, X } from "lucide-react";
 
-import { listLabs } from "@/lib/bff";
+import { LABS_LIST_QUERY } from "@/lib/graphql/operations";
+import type { LabsListData, LabsListVars } from "@/lib/graphql/operations";
 import { formatDate } from "@/lib/formatters";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
@@ -37,23 +38,18 @@ const TAB_STATUSES: Record<LabTab, string[] | undefined> = {
 
 function LabsPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load lab data.</p>
-              <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <LabsContent />
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load lab data.</p>
+          <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <LabsContent />
+    </ErrorBoundary>
   );
 }
 
@@ -66,32 +62,32 @@ function LabsContent() {
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  // The tab is its own filter, distinct from any text search — flipping
-  // back to "pending" while a search is active should keep the search.
   const status = useMemo(() => TAB_STATUSES[tab], [tab]);
 
   useEffect(() => {
     setOffset(0);
   }, [tab, patientQ, panelQ]);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["labs", tab, patientQ, panelQ, limit, offset],
-    queryFn: () =>
-      listLabs({
-        status,
-        patient_q: patientQ || undefined,
-        q: panelQ || undefined,
+  const { data, loading, previousData } = useQuery<LabsListData, LabsListVars>(
+    LABS_LIST_QUERY,
+    {
+      variables: {
+        status: status,
+        patientQ: patientQ || undefined,
         limit,
         offset,
-      }),
-    placeholderData: keepPreviousData,
-  });
+      },
+    },
+  );
 
-  if (isLoading || !data) {
+  const current = data ?? previousData;
+
+  if (loading && !current) {
     return <Skeleton className="h-96 w-full" />;
   }
 
-  const { items: labs, total } = data;
+  const labs = current?.labOrders.items ?? [];
+  const total = current?.labOrders.total ?? 0;
 
   return (
     <div className="space-y-6">
@@ -130,7 +126,7 @@ function LabsContent() {
           </div>
         </CardHeader>
         <CardContent
-          className={`transition-opacity ${isFetching ? "opacity-60" : "opacity-100"}`}
+          className={`transition-opacity ${loading ? "opacity-60" : "opacity-100"}`}
         >
           {labs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
@@ -151,14 +147,22 @@ function LabsContent() {
               <TableBody>
                 {labs.map((lab) => (
                   <TableRow key={lab.id}>
-                    <TableCell className="font-medium">{lab.panel_code}</TableCell>
-                    <TableCell>{lab.patient_name}</TableCell>
-                    <TableCell className="hidden md:table-cell">{lab.provider_name}</TableCell>
+                    <TableCell className="font-medium">{lab.panelCode}</TableCell>
+                    <TableCell>
+                      {lab.patient
+                        ? `${lab.patient.givenName} ${lab.patient.familyName}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {lab.provider
+                        ? `${lab.provider.givenName} ${lab.provider.familyName}`
+                        : "—"}
+                    </TableCell>
                     <TableCell className="hidden md:table-cell whitespace-nowrap">
-                      {formatDate(lab.ordered_at)}
+                      {formatDate(lab.orderedAt)}
                     </TableCell>
                     <TableCell className="hidden lg:table-cell whitespace-nowrap">
-                      {lab.collected_at ? formatDate(lab.collected_at) : "—"}
+                      {lab.collectedAt ? formatDate(lab.collectedAt) : "—"}
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={lab.status} />

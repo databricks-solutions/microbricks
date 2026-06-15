@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import { Search, X } from "lucide-react";
 
-import { listPatients } from "@/lib/bff";
+import { PATIENTS_LIST_QUERY } from "@/lib/graphql/operations";
+import type { PatientsListData, PatientsListVars } from "@/lib/graphql/operations";
 import { PatientAvatar } from "@/components/patient-avatar";
 import { Pagination } from "@/components/pagination";
 import { Button } from "@/components/ui/button";
@@ -26,57 +27,47 @@ export const Route = createFileRoute("/_dashboard/patients/")({
 
 function PatientsPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load patients.</p>
-              <button
-                onClick={resetErrorBoundary}
-                className="text-sm text-primary underline"
-              >
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <PatientsContent />
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load patients.</p>
+          <button
+            onClick={resetErrorBoundary}
+            className="text-sm text-primary underline"
+          >
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <PatientsContent />
+    </ErrorBoundary>
   );
 }
 
 function PatientsContent() {
-  // Local state, not URL search params — keeps the diff focused. The query
-  // key includes (q, limit, offset) so React Query treats each page+search
-  // combination as its own cache entry; `keepPreviousData` keeps the prior
-  // page rendered while the next one loads (avoids the layout shift you get
-  // from a Suspense fallback on every keystroke / page-flip).
   const [searchInput, setSearchInput] = useState("");
   const q = useDebouncedValue(searchInput, 250);
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  // Reset to first page whenever the search predicate changes — otherwise
-  // the user lands on page 7 of an older query and sees "No results".
   useEffect(() => {
     setOffset(0);
   }, [q]);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["patients", q, limit, offset],
-    queryFn: () => listPatients({ q: q || undefined, limit, offset }),
-    placeholderData: keepPreviousData,
-  });
+  const { data, loading, previousData } = useQuery<PatientsListData, PatientsListVars>(
+    PATIENTS_LIST_QUERY,
+    { variables: { q: q || undefined, limit, offset } },
+  );
 
-  if (isLoading || !data) {
+  const current = data ?? previousData;
+
+  if (loading && !current) {
     return <PatientsSkeleton />;
   }
 
-  const { items: patients, total } = data;
+  const patients = current?.patients.items ?? [];
+  const total = current?.patients.total ?? 0;
 
   return (
     <div className="space-y-4">
@@ -106,7 +97,7 @@ function PatientsContent() {
 
       <div
         className={`rounded-md border transition-opacity ${
-          isFetching ? "opacity-60" : "opacity-100"
+          loading ? "opacity-60" : "opacity-100"
         }`}
       >
         <Table>
@@ -129,8 +120,8 @@ function PatientsContent() {
                 <TableRow key={p.id} className="cursor-pointer">
                   <TableCell>
                     <PatientAvatar
-                      givenName={p.given_name}
-                      familyName={p.family_name}
+                      givenName={p.givenName}
+                      familyName={p.familyName}
                       className="h-8 w-8 text-xs"
                     />
                   </TableCell>
@@ -140,7 +131,7 @@ function PatientsContent() {
                       params={{ id: p.id }}
                       className="hover:underline"
                     >
-                      {p.given_name} {p.family_name}
+                      {p.givenName} {p.familyName}
                     </Link>
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">

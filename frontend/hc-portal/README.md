@@ -7,17 +7,21 @@ BFF + React UI for the healthcare reference architecture. The **only** Databrick
 ## What this app is
 
 ```
-React UI ──/api/bff/...──▶ FastAPI BFF ──╭─▶ patient-svc
-                                          ├─▶ provider-svc
-                                          ├─▶ appointment-svc
-                                          ├─▶ lab-svc
-                                          ├─▶ prescription-svc
-                                          ╰─▶ billing-svc
+React UI ──/api/bff/...──▶ FastAPI BFF (REST) ──╭─▶ patient-svc
+         ──/api/graphql──▶ Strawberry Gateway    ├─▶ provider-svc
+                           (DataLoaders +        ├─▶ appointment-svc
+                            nested resolvers)    ├─▶ lab-svc
+                                                 ├─▶ prescription-svc
+                                                 ╰─▶ billing-svc
 ```
 
 The BFF holds **no state** (no DB, no Redis, no module-level cache). Per-request typed clients fan out concurrently with `asyncio.gather`. The user's OBO token is forwarded into every downstream call so Unity Catalog row-level policy is enforced consistently.
 
-See [`.claude/skills/hc-bff-pattern/SKILL.md`](../../.claude/skills/hc-bff-pattern/SKILL.md) for the full canonical pattern.
+**Dual API surface:**
+- **REST** (`/api/bff/...`) — original aggregation routes, still active.
+- **GraphQL** (`/api/graphql`) — Strawberry gateway with DataLoader batch resolution, nested cross-service traversal (e.g. `appointment → patient`, `appointment → provider`), and partial-failure semantics. The frontend is migrating page-by-page from React Query to Apollo Client.
+
+See [`.claude/skills/hc-bff-pattern/SKILL.md`](../../.claude/skills/hc-bff-pattern/SKILL.md) for the REST pattern and [`.claude/skills/hc-graphql/SKILL.md`](../../.claude/skills/hc-graphql/SKILL.md) for the GraphQL pattern.
 
 ## Local development
 
@@ -31,11 +35,25 @@ This requires:
 
 ## Routes
 
+### REST (legacy, still active)
+
 | BFF route | Purpose |
 |---|---|
 | `GET /api/bff/healthz` | Liveness probe — does NOT touch downstream services. |
 | `GET /api/bff/patients` | Read-only proxy used by the patients index page. |
 | `GET /api/bff/patient-summary/{id}` | Canonical aggregation: patient + last 3 appointments + active Rx + recent labs + outstanding invoices, fanned out concurrently. |
+| `GET /api/bff/dashboard-stats` | Aggregate counts from all 6 services (concurrent fan-out). |
+
+### GraphQL gateway
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/graphql` | Strawberry GraphQL gateway — supports queries, mutations, introspection. |
+| `GET /api/graphql` | GraphiQL IDE (development only). |
+
+Key queries: `patients`, `patient`, `providers`, `appointments`, `labOrders`, `prescriptions`, `invoices`, `dashboardStats`.
+
+Nested resolvers: `AppointmentGQL.patient`, `AppointmentGQL.provider` (backed by DataLoaders for N+1 prevention).
 
 ## Tests
 

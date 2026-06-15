@@ -4,8 +4,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from strawberry.fastapi import GraphQLRouter
 
 from .db import close_all_pools
+from .graphql import schema
+from .graphql.context import get_context
 from .routers import patients
 
 
@@ -24,6 +27,10 @@ app = FastAPI(
 )
 
 app.include_router(patients.router, prefix="/api/v1")
+app.include_router(
+    GraphQLRouter(schema, context_getter=get_context),
+    prefix="/api/graphql",
+)
 
 
 @app.get("/api/v1/healthz")

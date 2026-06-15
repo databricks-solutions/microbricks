@@ -11,9 +11,8 @@ def test_app_imports_cleanly():
     from hc_portal.backend.app import app
 
     routes = {r.path for r in app.router.routes}
-    assert "/api/bff/healthz" in routes
-    assert "/api/bff/patients" in routes
-    assert "/api/bff/patient-summary/{patient_id}" in routes
+    assert "/api/graphql" in routes
+    assert "/api/version" in routes
 
 
 def test_clients_module_exposes_all_six():

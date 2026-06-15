@@ -58,8 +58,8 @@ Bump the API version in the affected service's `pyproject.toml` if so.
 After this PR merges to `main`:
 
 - [ ] `deploy-test.yml` succeeds end-to-end
-- [ ] Smoke `https://hc-portal-test.databricksapps.com/healthz` returns 200
-- [ ] BFF aggregation route on test returns valid data for a known seeded patient
+- [ ] Smoke `https://hc-portal-test.databricksapps.com/api/healthz` returns 200
+- [ ] BFF GraphQL query on test returns valid data for a known seeded patient
 - [ ] No errors in test workspace's app logs for 30 minutes after deploy
 
 Then tag and let `deploy-prod.yml` take over:

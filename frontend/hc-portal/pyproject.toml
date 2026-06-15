@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn>=0.37.0",
     "databricks-sdk>=0.74.0",
     "httpx>=0.27.0",
+    "strawberry-graphql[fastapi]>=0.262.0",
 ]
 
 [dependency-groups]
@@ -25,6 +26,7 @@ app-name = "hc-portal"
 app-slug = "hc_portal"
 app-entrypoint = "hc_portal.backend.app:app"
 api-prefix = "/api"
+healthz = "/api/healthz"
 metadata-path = "src/hc_portal/_metadata.py"
 
 [tool.apx.ui]

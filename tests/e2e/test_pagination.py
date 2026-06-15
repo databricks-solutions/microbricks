@@ -1,4 +1,4 @@
-"""E2E: Pagination and search correctness through the BFF."""
+"""E2E: Pagination and search correctness through the BFF GraphQL layer."""
 from __future__ import annotations
 
 import uuid
@@ -7,6 +7,19 @@ import httpx
 import pytest
 
 pytestmark = pytest.mark.e2e
+
+PATIENTS_QUERY = """
+    query Patients($q: String, $limit: Int!, $offset: Int!) {
+        patients(q: $q, limit: $limit, offset: $offset) {
+            items { id givenName }
+            total
+        }
+    }
+"""
+
+
+def _patients_gql(q=None, limit=50, offset=0):
+    return {"query": PATIENTS_QUERY, "variables": {"q": q, "limit": limit, "offset": offset}}
 
 
 async def test_pagination_returns_different_pages(
@@ -27,16 +40,18 @@ async def test_pagination_returns_different_pages(
         assert r.status_code == 201, f"Create patient failed: {r.status_code} {r.text}"
 
     # Page 1
-    r = await bff_client.get("/api/bff/patients", params={"limit": 2, "offset": 0})
+    r = await bff_client.post("/api/graphql", json=_patients_gql(limit=2, offset=0))
     assert r.status_code == 200
-    page1 = r.json()
+    body = r.json()
+    assert "errors" not in body, f"GraphQL errors: {body.get('errors')}"
+    page1 = body["data"]["patients"]
     assert len(page1["items"]) == 2
     assert page1["total"] >= 3
 
     # Page 2
-    r = await bff_client.get("/api/bff/patients", params={"limit": 2, "offset": 2})
+    r = await bff_client.post("/api/graphql", json=_patients_gql(limit=2, offset=2))
     assert r.status_code == 200
-    page2 = r.json()
+    page2 = r.json()["data"]["patients"]
     assert len(page2["items"]) >= 1
 
     # Pages contain different items
@@ -46,11 +61,11 @@ async def test_pagination_returns_different_pages(
 
 
 async def test_total_is_consistent_across_pages(bff_client: httpx.AsyncClient):
-    r1 = await bff_client.get("/api/bff/patients", params={"limit": 1, "offset": 0})
-    r2 = await bff_client.get("/api/bff/patients", params={"limit": 1, "offset": 1})
+    r1 = await bff_client.post("/api/graphql", json=_patients_gql(limit=1, offset=0))
+    r2 = await bff_client.post("/api/graphql", json=_patients_gql(limit=1, offset=1))
     assert r1.status_code == 200
     assert r2.status_code == 200
-    assert r1.json()["total"] == r2.json()["total"]
+    assert r1.json()["data"]["patients"]["total"] == r2.json()["data"]["patients"]["total"]
 
 
 async def test_search_filters_results(
@@ -69,8 +84,8 @@ async def test_search_filters_results(
     )
 
     # Search should find only our patient (unique name)
-    r = await bff_client.get("/api/bff/patients", params={"q": unique_name})
+    r = await bff_client.post("/api/graphql", json=_patients_gql(q=unique_name))
     assert r.status_code == 200
-    page = r.json()
+    page = r.json()["data"]["patients"]
     assert page["total"] >= 1
-    assert all(unique_name in p["given_name"] for p in page["items"])
+    assert all(unique_name in p["givenName"] for p in page["items"])

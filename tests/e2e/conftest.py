@@ -4,6 +4,9 @@ These tests run against deployed apps (ephemeral or stable). Required env vars:
   - BFF_BASE_URL: hc-portal BFF (e.g., https://hc-portal-pr-42-123.test.databricksapps.com)
   - USER_ONE_TOKEN: a valid Databricks access token
 
+The BFF exposes a single GraphQL endpoint at POST /api/graphql.
+Tests send queries as JSON: {"query": "...", "variables": {...}}.
+
 Optional (for direct service writes):
   - PATIENT_SVC_BASE_URL: patient service URL
   - APPOINTMENT_SVC_BASE_URL: appointment service URL

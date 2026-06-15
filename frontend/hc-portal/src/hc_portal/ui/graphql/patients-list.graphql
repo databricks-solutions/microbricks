@@ -1,0 +1,15 @@
+query PatientsList($q: String, $limit: Int! = 50, $offset: Int! = 0) {
+  patients(q: $q, limit: $limit, offset: $offset) {
+    items {
+      id
+      mrn
+      givenName
+      familyName
+      birthDate
+      sexAtBirth
+    }
+    total
+    limit
+    offset
+  }
+}

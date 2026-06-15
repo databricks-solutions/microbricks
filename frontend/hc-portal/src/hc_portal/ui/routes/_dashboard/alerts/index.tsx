@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import { AlertTriangle, Bell, Clock, Search, UserX, X } from "lucide-react";
 
-import { getAlerts } from "@/lib/bff";
+import { ALERTS_QUERY } from "@/lib/graphql/operations";
+import type { AlertsData, AlertsVars } from "@/lib/graphql/operations";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,23 +20,18 @@ export const Route = createFileRoute("/_dashboard/alerts/")({
 
 function AlertsPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load alerts.</p>
-              <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <AlertsContent />
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load alerts.</p>
+          <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <AlertsContent />
+    </ErrorBoundary>
   );
 }
 
@@ -72,22 +68,24 @@ function AlertsContent() {
   const [type, setType] = useState("");
   const q = useDebouncedValue(searchInput, 250);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["alerts", q, severity, type],
-    queryFn: () =>
-      getAlerts({
+  const { data, loading, previousData } = useQuery<AlertsData, AlertsVars>(
+    ALERTS_QUERY,
+    {
+      variables: {
         q: q || undefined,
         severity: severity || undefined,
         type: type || undefined,
-      }),
-    placeholderData: keepPreviousData,
-  });
+      },
+    },
+  );
 
-  if (isLoading || !data) {
+  const current = data ?? previousData;
+
+  if (loading && !current) {
     return <Skeleton className="h-96 w-full" />;
   }
 
-  const alerts = data.alerts;
+  const alerts = current?.alerts.alerts ?? [];
 
   return (
     <div className="space-y-6">
@@ -145,7 +143,7 @@ function AlertsContent() {
       </p>
 
       <div
-        className={`transition-opacity ${isFetching ? "opacity-60" : "opacity-100"}`}
+        className={`transition-opacity ${loading ? "opacity-60" : "opacity-100"}`}
       >
         {alerts.length === 0 ? (
           <Card>
@@ -176,8 +174,8 @@ function AlertsContent() {
                         </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground">{alert.detail}</p>
-                      {alert.patient_name && (
-                        <p className="text-xs text-muted-foreground">Patient: {alert.patient_name}</p>
+                      {alert.patientName && (
+                        <p className="text-xs text-muted-foreground">Patient: {alert.patientName}</p>
                       )}
                     </div>
                   </CardContent>

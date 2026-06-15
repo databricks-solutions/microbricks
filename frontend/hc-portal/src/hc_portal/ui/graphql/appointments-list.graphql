@@ -1,0 +1,42 @@
+query AppointmentsList(
+  $patientId: UUID
+  $providerId: UUID
+  $status: String
+  $limit: Int! = 50
+  $offset: Int! = 0
+) {
+  appointments(
+    patientId: $patientId
+    providerId: $providerId
+    status: $status
+    limit: $limit
+    offset: $offset
+  ) {
+    items {
+      id
+      patientId
+      providerId
+      visitTypeCode
+      scheduledStart
+      scheduledEnd
+      status
+      reason
+      patient {
+        id
+        mrn
+        givenName
+        familyName
+      }
+      provider {
+        id
+        npi
+        givenName
+        familyName
+        credentialSuffix
+      }
+    }
+    total
+    limit
+    offset
+  }
+}
