@@ -44,7 +44,7 @@ jobs:
       frontends_json: ${{ steps.disc.outputs.frontends_json }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - id: disc
@@ -66,10 +66,10 @@ jobs:
         service: ${{ fromJSON(needs.discover.outputs.service_dirs) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - name: uv sync
         working-directory: services/${{ matrix.service }}
         run: uv sync --all-groups
@@ -86,10 +86,10 @@ jobs:
         frontend: ${{ fromJSON(needs.discover.outputs.frontend_dirs) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - name: uv sync (BFF)
         working-directory: frontend/${{ matrix.frontend }}
         run: uv sync --all-groups
@@ -116,10 +116,10 @@ jobs:
       name: test
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - uses: databricks/setup-cli@main
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
@@ -191,7 +191,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('frontend/*/bun.lock') }}
@@ -207,7 +207,7 @@ jobs:
         run: ./scripts/build-frontends.sh
 
       - name: Upload frontend build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-builds
           path: frontend/*/src/*/__dist__/
@@ -410,10 +410,10 @@ jobs:
       url: ${{ steps.portal-url.outputs.url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - uses: databricks/setup-cli@main
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
@@ -467,14 +467,14 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('frontend/*/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
       - name: Download frontend build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: frontend-builds
           path: frontend/
