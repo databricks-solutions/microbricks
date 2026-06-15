@@ -268,3 +268,34 @@ The phased plan in [`ROADMAP.md`](ROADMAP.md) is mostly done — phases 1-7 (six
 - **Cost audit** — confirm idle endpoints scale to zero (already wired: 1h `suspend_timeout_duration` in `scripts/lakebase-project-up.sh` + `scripts/lakebase-branch-up.sh`); document expected dev-env monthly cost.
 
 Future / optional follow-ups (Phases 9–14 in [`ROADMAP.md`](ROADMAP.md)): service-mesh observability, saga/events demo, RLS demo, read-replica for prod, multi-region, shared APX UI library.
+
+---
+
+## License
+
+See [LICENSE](LICENSE). This is a reference architecture the data model is illustrative and the synthetic data is intentionally non-realistic.
+
+---
+
+## Libraries
+
+| Library | Role | License |
+|---------|------|---------|
+| [FastAPI](https://github.com/tiangolo/fastapi) | HTTP framework for all services and the BFF | MIT |
+| [Pydantic v2](https://github.com/pydantic/pydantic) | Request/response validation and settings | MIT |
+| [Strawberry GraphQL](https://github.com/strawberry-graphql/strawberry) | GraphQL API layer in the BFF | MIT |
+| [uvicorn](https://github.com/encode/uvicorn) | ASGI server | BSD-3-Clause |
+| [psycopg 3](https://github.com/psycopg/psycopg) | PostgreSQL driver (async + connection pooling) | LGPL-3.0 |
+| [SQLAlchemy](https://github.com/sqlalchemy/sqlalchemy) | ORM used by Alembic migrations | MIT |
+| [Alembic](https://github.com/sqlalchemy/alembic) | Database schema migrations | MIT |
+| [httpx](https://github.com/encode/httpx) | Async HTTP client (service-to-service calls) | BSD-3-Clause |
+| [Databricks SDK for Python](https://github.com/databricks/databricks-sdk-py) | Workspace client, OBO credential generation | Apache-2.0 |
+| [React](https://github.com/facebook/react) | Frontend UI library | MIT |
+| [TanStack Router](https://github.com/TanStack/router) | Type-safe file-based routing | MIT |
+| [TanStack Query](https://github.com/TanStack/query) | Server-state management and caching | MIT |
+| [Apollo Client](https://github.com/apollographql/apollo-client) | GraphQL client (used alongside REST hooks) | MIT |
+| [Vite](https://github.com/vitejs/vite) | Frontend build tooling and dev server | MIT |
+| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | Utility-first CSS framework | MIT |
+| [shadcn/ui](https://github.com/shadcn-ui/ui) | Accessible UI component primitives | MIT |
+| [uv](https://github.com/astral-sh/uv) | Python package/project manager | MIT |
+| [Bun](https://github.com/oven-sh/bun) | JavaScript runtime and package manager | MIT |
