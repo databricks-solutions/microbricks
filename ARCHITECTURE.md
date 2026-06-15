@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/brand/microbricks-logo.jpg" alt="microbricks — powered by Databricks" width="540">
+  <img src="docs/brand/microbricks-logo.png" alt="microbricks — powered by Databricks" width="540">
 </p>
 
 # Architecture
