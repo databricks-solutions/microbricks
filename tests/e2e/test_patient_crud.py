@@ -106,7 +106,11 @@ async def test_get_nonexistent_patient_returns_null(
     )
     assert r.status_code == 200
     body = r.json()
-    # Either returns null patient or has errors — both are valid
-    summary = body["data"]["patientSummary"]
-    if summary is not None:
-        assert summary["patient"] is None or "errors" in body
+    # GraphQL may return data=null with errors, or a null patient inside the summary
+    data = body.get("data")
+    if data is None:
+        assert "errors" in body
+    else:
+        summary = data.get("patientSummary")
+        if summary is not None:
+            assert summary["patient"] is None
