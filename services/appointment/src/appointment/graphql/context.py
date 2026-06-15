@@ -5,17 +5,23 @@ from dataclasses import dataclass
 
 from fastapi import Request
 from psycopg_pool import AsyncConnectionPool
+from strawberry.fastapi.context import BaseContext
 
 from ..auth import branch_name, user_email, user_token
 from ..db import OAuthConnection, get_pool
 
 
 @dataclass
-class GraphQLContext:
+class GraphQLContext(BaseContext):
     user_token: str
     user_email: str
     branch: str | None
     request: Request
+
+    def __post_init__(self) -> None:
+        self.response = None
+        self.background_tasks = None
+        self.connection_params = None
 
     async def pool(self) -> AsyncConnectionPool[OAuthConnection]:
         return await get_pool(self.user_email, self.user_token, self.branch)
