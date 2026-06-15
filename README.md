@@ -268,9 +268,3 @@ The phased plan in [`ROADMAP.md`](ROADMAP.md) is mostly done — phases 1-7 (six
 - **Cost audit** — confirm idle endpoints scale to zero (already wired: 1h `suspend_timeout_duration` in `scripts/lakebase-project-up.sh` + `scripts/lakebase-branch-up.sh`); document expected dev-env monthly cost.
 
 Future / optional follow-ups (Phases 9–14 in [`ROADMAP.md`](ROADMAP.md)): service-mesh observability, saga/events demo, RLS demo, read-replica for prod, multi-region, shared APX UI library.
-
----
-
-## License
-
-MIT. This is a reference architecture — **HIPAA compliance is your responsibility**, the data model is illustrative and the synthetic data is intentionally non-realistic. 
