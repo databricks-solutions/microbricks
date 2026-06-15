@@ -24,7 +24,7 @@ When you start a phase, edit this file in your branch to flip its checkbox to �
 
 ## Current state
 
-✅ Repository created at https://github.com/erinaldidb/microbricks
+✅ Repository created at https://github.com/databricks-solutions/microbricks
 ✅ Branch protections on `main` and `develop` (PR + CODEOWNERS review required)
 ✅ `prod` GitHub environment with manual approval gate
 ✅ Top-level docs: `README.md`, `ARCHITECTURE.md`, `HEALTHCARE_DATA_MODEL.md`, `CONTRIBUTING.md`, `CODEOWNERS`
@@ -428,7 +428,7 @@ The original Phase 5 design wired downstream URLs through DAB substitution (`${r
 **Resolution (final design):** the BFF's `clients/_base.py` resolves each downstream URL in two steps:
 
 1. **Explicit override** — read `<SVC>_SVC_URL` (e.g. `PATIENT_SVC_URL`). Set this in `frontend/hc-portal/app.yml` (`env:`) or in a bundle `config.env` block when you need to point at a non-canonical host: local dev (`http://localhost:800x`), a per-PR preview, an alternate region, etc.
-2. **Runtime-derived default** — the BFF strips its own `hc-portal` prefix off the platform-injected `DATABRICKS_APP_URL` (e.g. `hc-portal-dev-7474643727449861.aws.databricksapps.com`) and prepends the per-service slug. Sibling services share the `<svc>-<target>-<workspace_id>.<region>.databricksapps.com` pattern by construction.
+2. **Runtime-derived default** — the BFF strips its own `hc-portal` prefix off the platform-injected `DATABRICKS_APP_URL` (e.g. `hc-portal-dev-<workspace-id>.aws.databricksapps.com`) and prepends the per-service slug. Sibling services share the `<svc>-<target>-<workspace_id>.<region>.databricksapps.com` pattern by construction.
 
 This means: zero cross-app wiring needed for the canonical layout, an env-var escape hatch for everything else, and no dependency on DAB resolving `.url` references. Both paths are unit-tested (`tests/unit/test_base_url_resolution.py`) and live-verified in dev (override `LAB_SVC_URL` to an unreachable host → `partial=true` for `recent_lab_orders` while the other four downstreams keep working).
 

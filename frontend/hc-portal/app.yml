@@ -27,6 +27,6 @@ env:
 # block below to set one or more.
 #
 #  - name: PATIENT_SVC_URL
-#    value: "https://patient-pr-1234-7474643727449861.aws.databricksapps.com"
+#    value: "https://patient-pr-1234-<workspace-id>.aws.databricksapps.com"
 #  - name: PROVIDER_SVC_URL
 #    value: "http://localhost:8002"

@@ -30,7 +30,7 @@ resources:
       #   config:
       #     env:
       #       - name: PATIENT_SVC_URL
-      #         value: "https://patient-pr-1234-7474643727449861.aws.databricksapps.com"
+      #         value: "https://patient-pr-1234-<workspace-id>.aws.databricksapps.com"
       #
       # The same override can also live in `frontend/hc-portal/app.yml`
       # (commented-out example there). Bundle `config.env` overrides

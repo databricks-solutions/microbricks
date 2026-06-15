@@ -1,0 +1,37 @@
+Microbricks
+Copyright 2024-2026 Databricks, Inc.
+
+This product includes software developed at Databricks
+(https://www.databricks.com/).
+
+---
+
+Third-party software used by this project:
+
+Python dependencies:
+- FastAPI (MIT License) - https://github.com/tiangolo/fastapi
+- Pydantic (MIT License) - https://github.com/pydantic/pydantic
+- Strawberry GraphQL (MIT License) - https://github.com/strawberry-graphql/strawberry
+- uvicorn (BSD License) - https://github.com/encode/uvicorn
+- psycopg (LGPL-3.0 License) - https://github.com/psycopg/psycopg
+- httpx (BSD License) - https://github.com/encode/httpx
+- Alembic (MIT License) - https://github.com/sqlalchemy/alembic
+- SQLAlchemy (MIT License) - https://github.com/sqlalchemy/sqlalchemy
+- Databricks SDK for Python (Apache-2.0 License) - https://github.com/databricks/databricks-sdk-py
+
+JavaScript/TypeScript dependencies:
+- React (MIT License) - https://github.com/facebook/react
+- TanStack Router (MIT License) - https://github.com/TanStack/router
+- TanStack Query (MIT License) - https://github.com/TanStack/query
+- Apollo Client (MIT License) - https://github.com/apollographql/apollo-client
+- Vite (MIT License) - https://github.com/vitejs/vite
+- shadcn/ui (MIT License) - https://github.com/shadcn-ui/ui
+- Tailwind CSS (MIT License) - https://github.com/tailwindlabs/tailwindcss
+
+Build tools:
+- uv (MIT License) - https://github.com/astral-sh/uv
+- Bun (MIT License) - https://github.com/oven-sh/bun
+
+For the complete list of dependencies and their licenses, see the
+`pyproject.toml` files in each service directory and `package.json`
+files in each frontend directory.

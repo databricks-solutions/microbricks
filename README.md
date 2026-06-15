@@ -7,12 +7,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/deploy-dev.yml"><img alt="deploy-dev" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/deploy-dev.yml?branch=develop&label=deploy-dev&style=flat-square&logo=githubactions&logoColor=white"></a>
-  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/deploy-test.yml"><img alt="deploy-test" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/deploy-test.yml?branch=main&label=deploy-test&style=flat-square&logo=githubactions&logoColor=white"></a>
-  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/deploy-prod.yml"><img alt="deploy-prod" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/deploy-prod.yml?label=deploy-prod&style=flat-square&logo=githubactions&logoColor=white"></a>
-  <a href="https://github.com/erinaldidb/microbricks/actions/workflows/pr-validate.yml"><img alt="pr-validate" src="https://img.shields.io/github/actions/workflow/status/erinaldidb/microbricks/pr-validate.yml?label=pr-validate&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/databricks-solutions/microbricks/actions/workflows/deploy-dev.yml"><img alt="deploy-dev" src="https://img.shields.io/github/actions/workflow/status/databricks-solutions/microbricks/deploy-dev.yml?branch=develop&label=deploy-dev&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/databricks-solutions/microbricks/actions/workflows/deploy-test.yml"><img alt="deploy-test" src="https://img.shields.io/github/actions/workflow/status/databricks-solutions/microbricks/deploy-test.yml?branch=main&label=deploy-test&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/databricks-solutions/microbricks/actions/workflows/deploy-prod.yml"><img alt="deploy-prod" src="https://img.shields.io/github/actions/workflow/status/databricks-solutions/microbricks/deploy-prod.yml?label=deploy-prod&style=flat-square&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/databricks-solutions/microbricks/actions/workflows/pr-validate.yml"><img alt="pr-validate" src="https://img.shields.io/github/actions/workflow/status/databricks-solutions/microbricks/pr-validate.yml?label=pr-validate&style=flat-square&logo=githubactions&logoColor=white"></a>
   <img alt="status" src="https://img.shields.io/badge/status-phases%201--7%20complete-success?style=flat-square">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/erinaldidb/microbricks?style=flat-square"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/databricks-solutions/microbricks?style=flat-square"></a>
   <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square"></a>
   <img alt="GitFlow" src="https://img.shields.io/badge/workflow-GitFlow-orange?style=flat-square&logo=git&logoColor=white">
 </p>
@@ -111,7 +111,7 @@ databricks auth login --host https://<prod-workspace>.cloud.databricks.com --pro
 
 ```bash
 # 1. Clone
-git clone https://github.com/erinaldidb/microbricks.git
+git clone https://github.com/databricks-solutions/microbricks.git
 cd microbricks
 
 # 2. Validate the bundle (no Databricks calls, just YAML + schema checks)
@@ -252,7 +252,7 @@ A few details worth knowing:
 - **Frontends are built in CI.** `scripts/build-frontends.sh` auto-discovers every apx project under `frontend/` (anything with both `pyproject.toml` and `package.json`) and runs `apx frontend build` — `bundle deploy` only syncs files, so without this step the deployed app would 404 on every page route. The bundle force-includes the resulting `src/<pkg>/__dist__/` via `sync.include` in `databricks.yml`.
 - **Apps deploy in parallel.** `bundle deploy` wires the cross-app `CAN_USE` ACLs at deploy-time, so the seven `bundle run` calls (six services + `hc-portal`) fire concurrently. Wall time becomes `max(app startup)` rather than `sum`. Each subshell logs to its own file so a failure surfaces a clean log instead of interleaved noise.
 - **Smoke tests are strict.** Both the status code AND the body are asserted (`200` + literal `{"ok":true}`) — Databricks Apps' OBO gateway returns 200-with-HTML for unauthenticated requests, which would fool a vanilla `curl -fsS`.
-- **Environment URLs come from the apps API.** The Apps platform embeds the workspace ID into each app hostname (e.g. `hc-portal-7405606704848118.18.azure.databricksapps.com`), so we can't construct it client-side. Each deploy workflow's final step calls `databricks apps get hc-portal -o json` and feeds the canonical URL into `environment.url` and (for previews) into the PR comment table.
+- **Environment URLs come from the apps API.** The Apps platform embeds the workspace ID into each app hostname (e.g. `hc-portal-<workspace-id>.azure.databricksapps.com`), so we can't construct it client-side. Each deploy workflow's final step calls `databricks apps get hc-portal -o json` and feeds the canonical URL into `environment.url` and (for previews) into the PR comment table.
 
 > **Note:** GH-hosted runners may not reach the dev workspace if FE-VM's managed IP allowlist is in effect — see the `github-runner-ip-acl` finding. Where that's the case, `scripts/ci-local.sh` runs the same logical pipelines from a developer's machine where the IP is already allowlisted. See `CONTRIBUTING.md` "Running CI locally" for the dev/CI division of labor.
 

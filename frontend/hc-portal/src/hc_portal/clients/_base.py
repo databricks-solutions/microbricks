@@ -11,9 +11,9 @@ adapted to resolve downstream service URLs in this order:
 
   2. **Runtime-derived default**: compose from the BFF's own runtime
      context. Apps platform injects `DATABRICKS_APP_URL` on every running
-     app, e.g. `https://hc-portal-7474643727449861.aws.databricksapps.com`
+     app, e.g. `https://hc-portal-<workspace-id>.aws.databricksapps.com`
      (trunk dev/test/prod) or
-     `https://hc-portal-feat-<slug>-7474643727449861.aws.databricksapps.com`
+     `https://hc-portal-feat-<slug>-<workspace-id>.aws.databricksapps.com`
      (PR preview). Sibling services share the same `[-<suffix>]-<workspace_id>.<region>.databricksapps.com`
      tail — every app in this bundle is named `<svc>` (or `<svc>-feat-<slug>`
      for previews), so we strip our own `hc-portal` prefix off the host and
@@ -70,10 +70,10 @@ def _own_app_suffix() -> str:
     """Return the host tail shared by every app in this workspace.
 
     Examples:
-        BFF at https://hc-portal-7474643727449861.aws.databricksapps.com
-            -> -7474643727449861.aws.databricksapps.com
-        BFF at https://hc-portal-feat-foo-7474643727449861.aws.databricksapps.com
-            -> -feat-foo-7474643727449861.aws.databricksapps.com
+        BFF at https://hc-portal-<workspace-id>.aws.databricksapps.com
+            -> -<workspace-id>.aws.databricksapps.com
+        BFF at https://hc-portal-feat-foo-<workspace-id>.aws.databricksapps.com
+            -> -feat-foo-<workspace-id>.aws.databricksapps.com
     so callers can prepend a service slug like `patient`.
 
     Cached because it never changes within a process.

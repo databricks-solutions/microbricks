@@ -143,7 +143,7 @@ Concrete example: "book an appointment AND send a notification". Wrong shape —
 
 The BFF doesn't read per-service URL env vars. `clients/_base.py` derives them at runtime from two platform-injected vars:
 
-- `DATABRICKS_APP_URL` — the BFF's own URL, e.g. `https://hc-portal-dev-7474643727449861.aws.databricksapps.com`.
+- `DATABRICKS_APP_URL` — the BFF's own URL, e.g. `https://hc-portal-dev-<workspace-id>.aws.databricksapps.com`.
 - `DATABRICKS_WORKSPACE_ID` — the workspace this BFF is deployed in.
 
 Sibling services share the same `<target>-<workspace_id>.<region>.databricksapps.com` tail and follow the `<svc>-<target>` naming pattern, so the BFF just strips its own `hc-portal` prefix off the host and prepends the per-service slug. No bundle `config.env`, no `<SVC>_SVC_URL` env vars, no `apps update` step. See `clients/_base.py:_own_app_suffix` for the canonical implementation.

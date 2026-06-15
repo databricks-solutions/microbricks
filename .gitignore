@@ -80,5 +80,6 @@ docs/diagrams/*.tmp.drawio
 .claude/projects/
 .claude/sessions/
 .claude/cache/
+.claude/settings.local.json
 
 .apx/
