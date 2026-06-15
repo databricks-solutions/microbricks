@@ -1,4 +1,4 @@
-"""Typed BFF client for appointment-svc with create + status transitions."""
+"""Typed BFF client for appointment-svc via GraphQL."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from ._base import _BaseSvcClient
+from ._base import _BaseSvcClient, _camel_keys
 
 
 class Appointment(BaseModel):
@@ -29,21 +29,57 @@ class AppointmentCreatePayload(BaseModel):
     reason: str | None = None
 
 
+_APPOINTMENT_FIELDS = """
+    id
+    patientId
+    providerId
+    visitTypeCode
+    scheduledStart
+    scheduledEnd
+    status
+    reason
+"""
+
+_CREATE_MUTATION = """
+mutation CreateAppointment($input: AppointmentCreateInput!) {
+    createAppointment(input: $input) {
+        %s
+    }
+}
+""" % _APPOINTMENT_FIELDS
+
+_UPDATE_STATUS_MUTATION = """
+mutation UpdateAppointmentStatus($id: UUID!, $status: String!) {
+    updateAppointmentStatus(id: $id, status: $status) {
+        %s
+    }
+}
+""" % _APPOINTMENT_FIELDS
+
+
+def _to_appointment(d: dict) -> Appointment:
+    return Appointment(
+        id=d["id"],
+        patient_id=d["patientId"],
+        provider_id=d["providerId"],
+        visit_type_code=d["visitTypeCode"],
+        scheduled_start=d["scheduledStart"],
+        scheduled_end=d["scheduledEnd"],
+        status=d["status"],
+        reason=d["reason"],
+    )
+
+
 class AppointmentClient(_BaseSvcClient):
     def __init__(self, user_token: str, branch: str | None = None):
         super().__init__(user_token, service_slug="appointment", branch=branch)
 
     async def create(self, payload: AppointmentCreatePayload) -> Appointment:
-        r = await self._client.post(
-            "/api/v1/appointments", json=payload.model_dump(mode="json")
-        )
-        r.raise_for_status()
-        return Appointment.model_validate(r.json())
+        variables = {"input": _camel_keys(payload.model_dump(mode="json"))}
+        data = await self._graphql(_CREATE_MUTATION, variables)
+        return _to_appointment(data["createAppointment"])
 
     async def update_status(self, appointment_id: UUID, status: str) -> Appointment:
-        r = await self._client.patch(
-            f"/api/v1/appointments/{appointment_id}/status",
-            json={"status": status},
-        )
-        r.raise_for_status()
-        return Appointment.model_validate(r.json())
+        variables = {"id": str(appointment_id), "status": status}
+        data = await self._graphql(_UPDATE_STATUS_MUTATION, variables)
+        return _to_appointment(data["updateAppointmentStatus"])

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import {
   CalendarDays,
@@ -12,8 +12,14 @@ import {
   Clock,
 } from "lucide-react";
 
-import { getPatientSummary, getPatientTimeline } from "@/lib/bff";
-import type { TimelineEvent } from "@/lib/bff";
+import { PATIENT_SUMMARY_QUERY, PATIENT_TIMELINE_QUERY } from "@/lib/graphql/operations";
+import type {
+  PatientSummaryData,
+  PatientSummaryVars,
+  PatientTimelineData,
+  PatientTimelineVars,
+  TimelineEvent,
+} from "@/lib/graphql/operations";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/formatters";
 import { PatientAvatar } from "@/components/patient-avatar";
 import { StatCard } from "@/components/stat-card";
@@ -37,47 +43,44 @@ export const Route = createFileRoute("/_dashboard/patients/$id")({
 
 function PatientDetailPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load patient.</p>
-              <button
-                onClick={resetErrorBoundary}
-                className="text-sm text-primary underline"
-              >
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <Suspense fallback={<DetailSkeleton />}>
-            <PatientDetailContent />
-          </Suspense>
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load patient.</p>
+          <button
+            onClick={resetErrorBoundary}
+            className="text-sm text-primary underline"
+          >
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <Suspense fallback={<DetailSkeleton />}>
+        <PatientDetailContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
 function PatientDetailContent() {
   const { id } = Route.useParams();
-  const { data: summary } = useSuspenseQuery({
-    queryKey: ["patient-summary", id],
-    queryFn: () => getPatientSummary(id),
-  });
 
-  const { data: timeline } = useSuspenseQuery({
-    queryKey: ["patient-timeline", id],
-    queryFn: () => getPatientTimeline(id),
-  });
+  const { data: summaryData } = useSuspenseQuery<PatientSummaryData, PatientSummaryVars>(
+    PATIENT_SUMMARY_QUERY,
+    { variables: { id } },
+  );
 
-  const { patient, last_appointments, active_prescriptions, recent_lab_orders, outstanding_invoices, partial } = summary;
+  const { data: timelineData } = useSuspenseQuery<PatientTimelineData, PatientTimelineVars>(
+    PATIENT_TIMELINE_QUERY,
+    { variables: { id } },
+  );
 
-  const totalBalance = outstanding_invoices.reduce(
-    (acc, inv) => acc + inv.total_amount_cents,
+  const { patient, lastAppointments, activePrescriptions, recentLabOrders, outstandingInvoices, partial } = summaryData.patientSummary;
+  const timeline = timelineData.patientTimeline;
+
+  const totalBalance = outstandingInvoices.reduce(
+    (acc, inv) => acc + inv.totalAmountCents,
     0,
   );
 
@@ -94,14 +97,14 @@ function PatientDetailContent() {
       <Card>
         <CardContent className="flex flex-col sm:flex-row items-start gap-4 pt-6">
           <PatientAvatar
-            givenName={patient.given_name}
-            familyName={patient.family_name}
+            givenName={patient.givenName}
+            familyName={patient.familyName}
             className="h-16 w-16 text-xl"
           />
           <div className="flex-1 space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold">
-                {patient.given_name} {patient.family_name}
+                {patient.givenName} {patient.familyName}
               </h1>
               {partial && (
                 <Badge variant="destructive" className="gap-1">
@@ -112,8 +115,8 @@ function PatientDetailContent() {
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <span>MRN: {patient.mrn}</span>
-              <span>DOB: {formatDate(patient.birth_date)}</span>
-              <span>Sex: {patient.sex_at_birth}</span>
+              <span>DOB: {formatDate(patient.birthDate)}</span>
+              <span>Sex: {patient.sexAtBirth}</span>
             </div>
           </div>
         </CardContent>
@@ -122,17 +125,17 @@ function PatientDetailContent() {
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Appointments"
-          value={last_appointments.length}
+          value={lastAppointments.length}
           icon={CalendarDays}
         />
         <StatCard
           title="Active Meds"
-          value={active_prescriptions.length}
+          value={activePrescriptions.length}
           icon={Pill}
         />
         <StatCard
           title="Lab Orders"
-          value={recent_lab_orders.length}
+          value={recentLabOrders.length}
           icon={FlaskConical}
         />
         <StatCard
@@ -157,7 +160,7 @@ function PatientDetailContent() {
               <CardTitle className="text-base">Recent Appointments</CardTitle>
             </CardHeader>
             <CardContent>
-              {last_appointments.length === 0 ? (
+              {lastAppointments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No appointments.</p>
               ) : (
                 <Table>
@@ -171,16 +174,18 @@ function PatientDetailContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {last_appointments.map((a) => (
+                    {lastAppointments.map((a) => (
                       <TableRow key={a.id}>
                         <TableCell className="whitespace-nowrap">
-                          {formatDateTime(a.scheduled_start)}
+                          {formatDateTime(a.scheduledStart)}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          {a.provider_name ?? "—"}
+                          {a.provider
+                            ? `${a.provider.givenName} ${a.provider.familyName}`
+                            : "—"}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          {a.visit_type_code}
+                          {a.visitTypeCode}
                         </TableCell>
                         <TableCell className="hidden lg:table-cell text-muted-foreground">
                           {a.reason ?? "—"}
@@ -203,7 +208,7 @@ function PatientDetailContent() {
               <CardTitle className="text-base">Active Prescriptions</CardTitle>
             </CardHeader>
             <CardContent>
-              {active_prescriptions.length === 0 ? (
+              {activePrescriptions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No active prescriptions.</p>
               ) : (
                 <Table>
@@ -216,16 +221,16 @@ function PatientDetailContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {active_prescriptions.map((rx) => (
+                    {activePrescriptions.map((rx) => (
                       <TableRow key={rx.id}>
                         <TableCell className="font-medium">
-                          {rx.medication_code}
+                          {rx.medicationCode}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          {rx.dose_text}
+                          {rx.doseText}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          {rx.refills_remaining}
+                          {rx.refillsRemaining}
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={rx.status} />
@@ -245,7 +250,7 @@ function PatientDetailContent() {
               <CardTitle className="text-base">Recent Lab Orders</CardTitle>
             </CardHeader>
             <CardContent>
-              {recent_lab_orders.length === 0 ? (
+              {recentLabOrders.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No lab orders.</p>
               ) : (
                 <Table>
@@ -258,16 +263,16 @@ function PatientDetailContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {recent_lab_orders.map((lab) => (
+                    {recentLabOrders.map((lab) => (
                       <TableRow key={lab.id}>
                         <TableCell className="font-medium">
-                          {lab.panel_code}
+                          {lab.panelCode}
                         </TableCell>
                         <TableCell className="hidden md:table-cell whitespace-nowrap">
-                          {formatDate(lab.ordered_at)}
+                          {formatDate(lab.orderedAt)}
                         </TableCell>
                         <TableCell className="hidden md:table-cell whitespace-nowrap">
-                          {lab.collected_at ? formatDate(lab.collected_at) : "—"}
+                          {lab.collectedAt ? formatDate(lab.collectedAt) : "—"}
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={lab.status} />
@@ -287,7 +292,7 @@ function PatientDetailContent() {
               <CardTitle className="text-base">Outstanding Invoices</CardTitle>
             </CardHeader>
             <CardContent>
-              {outstanding_invoices.length === 0 ? (
+              {outstandingInvoices.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No invoices.</p>
               ) : (
                 <Table>
@@ -300,16 +305,16 @@ function PatientDetailContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {outstanding_invoices.map((inv) => (
+                    {outstandingInvoices.map((inv) => (
                       <TableRow key={inv.id}>
                         <TableCell className="font-medium">
-                          {formatCurrency(inv.total_amount_cents, inv.currency)}
+                          {formatCurrency(inv.totalAmountCents, inv.currency)}
                         </TableCell>
                         <TableCell className="hidden md:table-cell whitespace-nowrap">
-                          {formatDate(inv.issued_at)}
+                          {formatDate(inv.issuedAt)}
                         </TableCell>
                         <TableCell className="hidden md:table-cell whitespace-nowrap">
-                          {inv.due_at ? formatDate(inv.due_at) : "—"}
+                          {inv.dueAt ? formatDate(inv.dueAt) : "—"}
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={inv.status} />
@@ -354,7 +359,7 @@ const eventTypeConfig: Record<string, { icon: typeof CalendarDays; color: string
 };
 
 function TimelineItem({ event, isLast }: { event: TimelineEvent; isLast: boolean }) {
-  const config = eventTypeConfig[event.event_type] ?? { icon: Clock, color: "text-muted-foreground" };
+  const config = eventTypeConfig[event.eventType] ?? { icon: Clock, color: "text-muted-foreground" };
   const Icon = config.icon;
 
   return (

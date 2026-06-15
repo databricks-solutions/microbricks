@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import {
   CalendarDays,
@@ -10,7 +10,8 @@ import {
   X,
 } from "lucide-react";
 
-import { listAppointments } from "@/lib/bff";
+import { APPOINTMENTS_LIST_QUERY } from "@/lib/graphql/operations";
+import type { AppointmentsListData, AppointmentsListVars } from "@/lib/graphql/operations";
 import { formatDateTime } from "@/lib/formatters";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
@@ -35,23 +36,18 @@ export const Route = createFileRoute("/_dashboard/appointments/")({
 
 function AppointmentsPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load appointments.</p>
-              <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <AppointmentsContent />
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load appointments.</p>
+          <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <AppointmentsContent />
+    </ErrorBoundary>
   );
 }
 
@@ -76,9 +72,6 @@ function AppointmentsContent() {
   const patientQ = useDebouncedValue(patientSearch, 300);
   const reasonQ = useDebouncedValue(reasonSearch, 300);
 
-  // Build the date window for the BFF as ISO date strings — the server
-  // applies `scheduled_start::date BETWEEN from AND to` so the query is
-  // sargable against the existing index.
   const { fromDate, toDate, weekLabel } = useMemo(() => {
     const now = new Date();
     const startOfWeek = new Date(now);
@@ -94,31 +87,32 @@ function AppointmentsContent() {
     };
   }, [weekOffset]);
 
-  // Reset paging whenever any predicate changes.
   useEffect(() => {
     setPageOffset(0);
   }, [patientQ, reasonQ, status, fromDate, toDate]);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["appointments", patientQ, reasonQ, status, fromDate, toDate, limit, pageOffset],
-    queryFn: () =>
-      listAppointments({
-        q: reasonQ || undefined,
-        patient_q: patientQ || undefined,
+  const { data, loading, previousData } = useQuery<AppointmentsListData, AppointmentsListVars>(
+    APPOINTMENTS_LIST_QUERY,
+    {
+      variables: {
+        patientQ: patientQ || undefined,
         status: status || undefined,
-        from_date: fromDate,
-        to_date: toDate,
+        fromDate,
+        toDate,
         limit,
         offset: pageOffset,
-      }),
-    placeholderData: keepPreviousData,
-  });
+      },
+    },
+  );
 
-  if (isLoading || !data) {
+  const current = data ?? previousData;
+
+  if (loading && !current) {
     return <Skeleton className="h-96 w-full" />;
   }
 
-  const { items: filtered, total } = data;
+  const items = current?.appointments.items ?? [];
+  const total = current?.appointments.total ?? 0;
 
   return (
     <div className="space-y-6">
@@ -167,9 +161,9 @@ function AppointmentsContent() {
           </div>
         </CardHeader>
         <CardContent
-          className={`transition-opacity ${isFetching ? "opacity-60" : "opacity-100"}`}
+          className={`transition-opacity ${loading ? "opacity-60" : "opacity-100"}`}
         >
-          {filtered.length === 0 ? (
+          {items.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
               No appointments match the current filter.
             </p>
@@ -186,14 +180,22 @@ function AppointmentsContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((a) => (
+                {items.map((a) => (
                   <TableRow key={a.id}>
                     <TableCell className="whitespace-nowrap">
-                      {formatDateTime(a.scheduled_start)}
+                      {formatDateTime(a.scheduledStart)}
                     </TableCell>
-                    <TableCell className="font-medium">{a.patient_name}</TableCell>
-                    <TableCell className="hidden md:table-cell">{a.provider_name}</TableCell>
-                    <TableCell className="hidden md:table-cell">{a.visit_type_code}</TableCell>
+                    <TableCell className="font-medium">
+                      {a.patient
+                        ? `${a.patient.givenName} ${a.patient.familyName}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {a.provider
+                        ? `${a.provider.givenName} ${a.provider.familyName}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">{a.visitTypeCode}</TableCell>
                     <TableCell className="hidden lg:table-cell text-muted-foreground">
                       {a.reason ?? "—"}
                     </TableCell>

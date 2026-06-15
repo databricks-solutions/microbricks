@@ -1,11 +1,25 @@
 import { Suspense, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import { Users, CalendarDays, Pill, FlaskConical, Bug } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
-import { listPatients, getDashboardStats, listAppointments, getAlerts } from "@/lib/bff";
+import {
+  DASHBOARD_STATS_QUERY,
+  PATIENTS_LIST_QUERY,
+  APPOINTMENTS_LIST_QUERY,
+  ALERTS_QUERY,
+} from "@/lib/graphql/operations";
+import type {
+  DashboardStatsData,
+  PatientsListData,
+  PatientsListVars,
+  AppointmentsListData,
+  AppointmentsListVars,
+  AlertsData,
+  AlertsVars,
+} from "@/lib/graphql/operations";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/stat-card";
 import { PatientAvatar } from "@/components/patient-avatar";
@@ -26,52 +40,38 @@ export const Route = createFileRoute("/_dashboard/")({
 
 function DashboardPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load dashboard data.</p>
-              <button
-                onClick={resetErrorBoundary}
-                className="text-sm text-primary underline"
-              >
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <Suspense fallback={<DashboardSkeleton />}>
-            <DashboardContent />
-          </Suspense>
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load dashboard data.</p>
+          <button
+            onClick={resetErrorBoundary}
+            className="text-sm text-primary underline"
+          >
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
 function DashboardContent() {
   const [showDebug, setShowDebug] = useState(false);
 
-  // Dashboard previews use small dedicated pages — the full-detail pages
-  // own the search/filter UX. We page-size at 5 for "recent patients" and
-  // 200 for the week chart so each tile has the data it needs without
-  // dragging the whole DB into the dashboard.
-  const { data: patientsPage } = useSuspenseQuery({
-    queryKey: ["patients", "dashboard"],
-    queryFn: () => listPatients({ limit: 5 }),
-  });
-  const patients = patientsPage.items;
+  const { data: statsData } = useSuspenseQuery<DashboardStatsData>(DASHBOARD_STATS_QUERY);
+  const stats = statsData.dashboardStats;
 
-  const { data: stats } = useSuspenseQuery({
-    queryKey: ["dashboard-stats"],
-    queryFn: getDashboardStats,
-  });
+  const { data: patientsData } = useSuspenseQuery<PatientsListData, PatientsListVars>(
+    PATIENTS_LIST_QUERY,
+    { variables: { limit: 5, offset: 0 } },
+  );
+  const patients = patientsData.patients.items;
 
-  // Limit the week chart to a window of dates so we never page beyond what
-  // the chart needs. 200 rows is the max page size — enough for any
-  // realistic week.
   const { fromDate, toDate } = useMemo(() => {
     const now = new Date();
     const startOfWeek = new Date(now);
@@ -83,17 +83,14 @@ function DashboardContent() {
     return { fromDate: iso(startOfWeek), toDate: iso(endOfWeek) };
   }, []);
 
-  const { data: appointmentsPage } = useSuspenseQuery({
-    queryKey: ["appointments", "dashboard-week", fromDate, toDate],
-    queryFn: () =>
-      listAppointments({ from_date: fromDate, to_date: toDate, limit: 200 }),
-  });
-  const appointments = appointmentsPage.items;
+  const { data: appointmentsData } = useSuspenseQuery<AppointmentsListData, AppointmentsListVars>(
+    APPOINTMENTS_LIST_QUERY,
+    { variables: { fromDate, toDate, limit: 200, offset: 0 } },
+  );
+  const appointments = appointmentsData.appointments.items;
 
-  const { data: alerts } = useSuspenseQuery({
-    queryKey: ["alerts"],
-    queryFn: () => getAlerts(),
-  });
+  const { data: alertsData } = useSuspenseQuery<AlertsData, AlertsVars>(ALERTS_QUERY);
+  const alerts = alertsData.alerts;
 
   const chartData = useMemo(() => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -109,7 +106,7 @@ function DashboardContent() {
       dayEnd.setDate(dayStart.getDate() + 1);
 
       const count = appointments.filter((a) => {
-        const d = new Date(a.scheduled_start);
+        const d = new Date(a.scheduledStart);
         return d >= dayStart && d < dayEnd;
       }).length;
 
@@ -135,13 +132,13 @@ function DashboardContent() {
         <div className="rounded-md border border-dashed border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20 p-3">
           <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-2">Entity Counts (all domains)</p>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="outline" className="text-xs">Patients: {stats.total_patients}</Badge>
-            <Badge variant="outline" className="text-xs">Appointments: {stats.total_appointments}</Badge>
-            <Badge variant="outline" className="text-xs">Providers: {stats.total_providers}</Badge>
-            <Badge variant="outline" className="text-xs">Invoices: {stats.total_invoices}</Badge>
-            <Badge variant="outline" className="text-xs">Lab Orders: {stats.total_lab_orders}</Badge>
+            <Badge variant="outline" className="text-xs">Patients: {stats.totalPatients}</Badge>
+            <Badge variant="outline" className="text-xs">Appointments: {stats.totalAppointments ?? 0}</Badge>
+            <Badge variant="outline" className="text-xs">Providers: {stats.totalProviders ?? 0}</Badge>
+            <Badge variant="outline" className="text-xs">Invoices: {stats.totalInvoices ?? 0}</Badge>
+            <Badge variant="outline" className="text-xs">Lab Orders: {stats.totalLabOrders ?? 0}</Badge>
             <Badge variant="outline" className="text-xs">Alerts: {alerts.total ?? alerts.alerts.length}</Badge>
-            <Badge variant="outline" className="text-xs">Active Rx: {stats.active_prescriptions}</Badge>
+            <Badge variant="outline" className="text-xs">Active Rx: {stats.activePrescriptions ?? 0}</Badge>
           </div>
         </div>
       )}
@@ -149,25 +146,25 @@ function DashboardContent() {
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Total Patients"
-          value={stats.total_patients}
+          value={stats.totalPatients}
           icon={Users}
           description="Registered patients"
         />
         <StatCard
           title="Appointments"
-          value={stats.todays_appointments}
+          value={stats.todaysAppointments ?? 0}
           icon={CalendarDays}
           description="Scheduled today"
         />
         <StatCard
           title="Active Prescriptions"
-          value={stats.active_prescriptions}
+          value={stats.activePrescriptions ?? 0}
           icon={Pill}
           description="Currently active"
         />
         <StatCard
           title="Pending Labs"
-          value={stats.pending_labs}
+          value={stats.pendingLabs ?? 0}
           icon={FlaskConical}
           description="Ordered or collected"
         />
@@ -215,13 +212,13 @@ function DashboardContent() {
                 <TableRow key={p.id}>
                   <TableCell>
                     <PatientAvatar
-                      givenName={p.given_name}
-                      familyName={p.family_name}
+                      givenName={p.givenName}
+                      familyName={p.familyName}
                       className="h-8 w-8 text-xs"
                     />
                   </TableCell>
                   <TableCell className="font-medium">
-                    {p.given_name} {p.family_name}
+                    {p.givenName} {p.familyName}
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">
                     {p.mrn}

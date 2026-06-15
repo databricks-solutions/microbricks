@@ -1,0 +1,14 @@
+query DashboardStats {
+  dashboardStats {
+    totalPatients
+    totalProviders
+    totalAppointments
+    todaysAppointments
+    totalLabOrders
+    pendingLabs
+    totalPrescriptions
+    activePrescriptions
+    totalInvoices
+    partial
+  }
+}

@@ -1,4 +1,4 @@
-"""Typed BFF client for lab-svc with create + status transitions."""
+"""Typed BFF client for lab-svc via GraphQL."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from ._base import _BaseSvcClient
+from ._base import _BaseSvcClient, _camel_keys
 
 
 class LabOrder(BaseModel):
@@ -28,21 +28,59 @@ class LabOrderCreatePayload(BaseModel):
     panel_code: str
 
 
+_LAB_ORDER_FIELDS = """
+    id
+    patientId
+    orderingProviderId
+    appointmentId
+    panelCode
+    status
+    orderedAt
+    collectedAt
+    resultedAt
+"""
+
+_CREATE_MUTATION = """
+mutation CreateLabOrder($input: LabOrderCreateInput!) {
+    createLabOrder(input: $input) {
+        %s
+    }
+}
+""" % _LAB_ORDER_FIELDS
+
+_UPDATE_STATUS_MUTATION = """
+mutation UpdateLabOrderStatus($id: UUID!, $status: String!) {
+    updateLabOrderStatus(id: $id, status: $status) {
+        %s
+    }
+}
+""" % _LAB_ORDER_FIELDS
+
+
+def _to_lab_order(d: dict) -> LabOrder:
+    return LabOrder(
+        id=d["id"],
+        patient_id=d["patientId"],
+        ordering_provider_id=d["orderingProviderId"],
+        appointment_id=d["appointmentId"],
+        panel_code=d["panelCode"],
+        status=d["status"],
+        ordered_at=d["orderedAt"],
+        collected_at=d["collectedAt"],
+        resulted_at=d["resultedAt"],
+    )
+
+
 class LabClient(_BaseSvcClient):
     def __init__(self, user_token: str, branch: str | None = None):
         super().__init__(user_token, service_slug="lab", branch=branch)
 
     async def create_order(self, payload: LabOrderCreatePayload) -> LabOrder:
-        r = await self._client.post(
-            "/api/v1/lab-orders", json=payload.model_dump(mode="json")
-        )
-        r.raise_for_status()
-        return LabOrder.model_validate(r.json())
+        variables = {"input": _camel_keys(payload.model_dump(mode="json"))}
+        data = await self._graphql(_CREATE_MUTATION, variables)
+        return _to_lab_order(data["createLabOrder"])
 
     async def update_order_status(self, lab_order_id: UUID, status: str) -> LabOrder:
-        r = await self._client.patch(
-            f"/api/v1/lab-orders/{lab_order_id}/status",
-            json={"status": status},
-        )
-        r.raise_for_status()
-        return LabOrder.model_validate(r.json())
+        variables = {"id": str(lab_order_id), "status": status}
+        data = await self._graphql(_UPDATE_STATUS_MUTATION, variables)
+        return _to_lab_order(data["updateLabOrderStatus"])

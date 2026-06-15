@@ -1,4 +1,4 @@
-"""Typed BFF client for patient-svc with create support."""
+"""Typed BFF client for patient-svc via GraphQL."""
 from __future__ import annotations
 
 from datetime import date
@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from ._base import _BaseSvcClient
+from ._base import _BaseSvcClient, _camel_keys
 
 
 class Patient(BaseModel):
@@ -30,26 +30,55 @@ class PatientCreatePayload(BaseModel):
     phone: str | None = None
 
 
+_LIST_QUERY = """
+query ListPatients($limit: Int!) {
+    patients(limit: $limit) {
+        items {
+            id
+            mrn
+            givenName
+            familyName
+            birthDate
+            sexAtBirth
+        }
+    }
+}
+"""
+
+_CREATE_MUTATION = """
+mutation CreatePatient($input: PatientCreateInput!) {
+    createPatient(input: $input) {
+        id
+        mrn
+        givenName
+        familyName
+        birthDate
+        sexAtBirth
+    }
+}
+"""
+
+
+def _to_patient(d: dict) -> Patient:
+    return Patient(
+        id=d["id"],
+        mrn=d["mrn"],
+        given_name=d["givenName"],
+        family_name=d["familyName"],
+        birth_date=d["birthDate"],
+        sex_at_birth=d["sexAtBirth"],
+    )
+
+
 class PatientClient(_BaseSvcClient):
     def __init__(self, user_token: str, branch: str | None = None):
         super().__init__(user_token, service_slug="patient", branch=branch)
 
     async def list(self, *, limit: int = 200) -> list[Patient]:
-        """All patients (up to one page) for the simulator's directory cache.
-
-        patient-svc returns the paginated envelope
-        `{items, total, limit, offset}` — caps `limit` at 200 (the svc max).
-        The simulator only needs the directory snapshot, not pagination state.
-        """
-        r = await self._client.get(
-            "/api/v1/patients", params={"limit": limit}
-        )
-        r.raise_for_status()
-        return [Patient.model_validate(x) for x in r.json()["items"]]
+        data = await self._graphql(_LIST_QUERY, {"limit": limit})
+        return [_to_patient(p) for p in data["patients"]["items"]]
 
     async def create(self, payload: PatientCreatePayload) -> Patient:
-        r = await self._client.post(
-            "/api/v1/patients", json=payload.model_dump(mode="json")
-        )
-        r.raise_for_status()
-        return Patient.model_validate(r.json())
+        variables = {"input": _camel_keys(payload.model_dump(mode="json"))}
+        data = await self._graphql(_CREATE_MUTATION, variables)
+        return _to_patient(data["createPatient"])

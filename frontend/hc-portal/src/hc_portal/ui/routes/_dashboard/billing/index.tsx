@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import { Receipt, AlertTriangle, Clock, DollarSign, Search, X } from "lucide-react";
 
-import { getBillingOverview } from "@/lib/bff";
+import { BILLING_OVERVIEW_QUERY } from "@/lib/graphql/operations";
+import type { BillingOverviewData, BillingOverviewVars } from "@/lib/graphql/operations";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { Pagination } from "@/components/pagination";
 import { StatCard } from "@/components/stat-card";
@@ -39,23 +40,18 @@ const STATUS_OPTIONS = [
 
 function BillingPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load billing data.</p>
-              <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <BillingContent />
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load billing data.</p>
+          <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <BillingContent />
+    </ErrorBoundary>
   );
 }
 
@@ -73,46 +69,48 @@ function BillingContent() {
     setOffset(0);
   }, [patientQ, amountQ, status]);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["billing-overview", patientQ, amountQ, status, limit, offset],
-    queryFn: () =>
-      getBillingOverview({
-        patient_q: patientQ || undefined,
+  const { data, loading, previousData } = useQuery<BillingOverviewData, BillingOverviewVars>(
+    BILLING_OVERVIEW_QUERY,
+    {
+      variables: {
+        patientQ: patientQ || undefined,
         q: amountQ || undefined,
         status: status || undefined,
         limit,
         offset,
-      }),
-    placeholderData: keepPreviousData,
-  });
+      },
+    },
+  );
 
-  if (isLoading || !data) {
+  const current = data ?? previousData;
+
+  if (loading && !current) {
     return <Skeleton className="h-96 w-full" />;
   }
+
+  const overview = current?.billingOverview;
+  if (!overview) return null;
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Billing Overview</h1>
 
-      {/* Aging stats are computed server-side against the FULL outstanding
-          ledger, not just the current page — see _aging_aggregate in
-          aggregations.py. */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
         <StatCard
           title="Total Outstanding"
-          value={formatCurrency(data.total_outstanding_cents)}
+          value={formatCurrency(overview.totalOutstandingCents)}
           icon={DollarSign}
           description="Across all patients"
         />
         <StatCard
           title="Overdue"
-          value={data.overdue_count}
+          value={overview.overdueCount}
           icon={AlertTriangle}
           description="Past due date"
         />
         <StatCard
           title="Due Soon"
-          value={data.due_soon_count}
+          value={overview.dueSoonCount}
           icon={Clock}
           description="Due within 7 days"
         />
@@ -122,7 +120,7 @@ function BillingContent() {
         <CardHeader className="space-y-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Receipt className="h-4 w-4" />
-            Invoices ({data.total.toLocaleString()})
+            Invoices ({overview.total.toLocaleString()})
           </CardTitle>
           <div className="grid gap-3 sm:grid-cols-3">
             <SearchBox
@@ -145,9 +143,9 @@ function BillingContent() {
           </div>
         </CardHeader>
         <CardContent
-          className={`transition-opacity ${isFetching ? "opacity-60" : "opacity-100"}`}
+          className={`transition-opacity ${loading ? "opacity-60" : "opacity-100"}`}
         >
-          {data.invoices.length === 0 ? (
+          {overview.invoices.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
               No invoices match the current filter.
             </p>
@@ -163,15 +161,19 @@ function BillingContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.invoices.map((inv) => (
+                {overview.invoices.map((inv) => (
                   <TableRow key={inv.id}>
-                    <TableCell className="font-medium">{inv.patient_name}</TableCell>
-                    <TableCell>{formatCurrency(inv.total_amount_cents, inv.currency)}</TableCell>
+                    <TableCell className="font-medium">
+                      {inv.patient
+                        ? `${inv.patient.givenName} ${inv.patient.familyName}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell>{formatCurrency(inv.totalAmountCents, inv.currency)}</TableCell>
                     <TableCell className="hidden md:table-cell whitespace-nowrap">
-                      {formatDate(inv.issued_at)}
+                      {formatDate(inv.issuedAt)}
                     </TableCell>
                     <TableCell className="hidden md:table-cell whitespace-nowrap">
-                      {inv.due_at ? formatDate(inv.due_at) : "—"}
+                      {inv.dueAt ? formatDate(inv.dueAt) : "—"}
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={inv.status} />
@@ -185,7 +187,7 @@ function BillingContent() {
       </Card>
 
       <Pagination
-        total={data.total}
+        total={overview.total}
         limit={limit}
         offset={offset}
         onOffsetChange={setOffset}

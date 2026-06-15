@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { QueryErrorResetBoundary, keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@apollo/client/react";
 import { ErrorBoundary } from "react-error-boundary";
 import { Search, Stethoscope, X } from "lucide-react";
 
-import { listProviders } from "@/lib/bff";
+import { PROVIDERS_LIST_QUERY } from "@/lib/graphql/operations";
+import type { ProvidersListData, ProvidersListVars } from "@/lib/graphql/operations";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,23 +31,18 @@ type ActiveFilter = "all" | "active" | "inactive";
 
 function ProvidersPage() {
   return (
-    <QueryErrorResetBoundary>
-      {({ reset }) => (
-        <ErrorBoundary
-          onReset={reset}
-          fallbackRender={({ resetErrorBoundary }) => (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-muted-foreground">Failed to load providers.</p>
-              <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
-                Try again
-              </button>
-            </div>
-          )}
-        >
-          <ProvidersContent />
-        </ErrorBoundary>
+    <ErrorBoundary
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <p className="text-muted-foreground">Failed to load providers.</p>
+          <button onClick={resetErrorBoundary} className="text-sm text-primary underline">
+            Try again
+          </button>
+        </div>
       )}
-    </QueryErrorResetBoundary>
+    >
+      <ProvidersContent />
+    </ErrorBoundary>
   );
 }
 
@@ -57,30 +53,25 @@ function ProvidersContent() {
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  // Reset paging when the predicate changes — prevents "no results" on an
-  // out-of-range page after the user types or flips the active filter.
   useEffect(() => {
     setOffset(0);
   }, [q, activeFilter]);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["providers", q, activeFilter, limit, offset],
-    queryFn: () =>
-      listProviders({
-        q: q || undefined,
-        is_active:
-          activeFilter === "all" ? undefined : activeFilter === "active",
-        limit,
-        offset,
-      }),
-    placeholderData: keepPreviousData,
-  });
+  const isActive = activeFilter === "all" ? undefined : activeFilter === "active";
 
-  if (isLoading || !data) {
+  const { data, loading, previousData } = useQuery<ProvidersListData, ProvidersListVars>(
+    PROVIDERS_LIST_QUERY,
+    { variables: { q: q || undefined, isActive: isActive, limit, offset } },
+  );
+
+  const current = data ?? previousData;
+
+  if (loading && !current) {
     return <Skeleton className="h-96 w-full" />;
   }
 
-  const { items: providers, total } = data;
+  const providers = current?.providers.items ?? [];
+  const total = current?.providers.total ?? 0;
 
   return (
     <div className="space-y-6">
@@ -125,7 +116,7 @@ function ProvidersContent() {
           </div>
         </CardHeader>
         <CardContent
-          className={`transition-opacity ${isFetching ? "opacity-60" : "opacity-100"}`}
+          className={`transition-opacity ${loading ? "opacity-60" : "opacity-100"}`}
         >
           {providers.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
@@ -147,9 +138,9 @@ function ProvidersContent() {
                 {providers.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">
-                      {p.given_name} {p.family_name}
-                      {p.credential_suffix && (
-                        <span className="text-muted-foreground ml-1">, {p.credential_suffix}</span>
+                      {p.givenName} {p.familyName}
+                      {p.credentialSuffix && (
+                        <span className="text-muted-foreground ml-1">, {p.credentialSuffix}</span>
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell font-mono text-sm">
@@ -159,8 +150,8 @@ function ProvidersContent() {
                       {p.email}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={p.is_active ? "default" : "secondary"}>
-                        {p.is_active ? "Active" : "Inactive"}
+                      <Badge variant={p.isActive ? "default" : "secondary"}>
+                        {p.isActive ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
                   </TableRow>

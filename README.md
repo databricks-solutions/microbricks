@@ -26,6 +26,7 @@
 <p align="center">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white">
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119-009688?style=flat-square&logo=fastapi&logoColor=white">
+  <img alt="Strawberry GraphQL" src="https://img.shields.io/badge/Strawberry-GraphQL-E10098?style=flat-square&logo=graphql&logoColor=white">
   <img alt="Pydantic v2" src="https://img.shields.io/badge/Pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white">
   <img alt="Alembic" src="https://img.shields.io/badge/Alembic-migrations-6BA539?style=flat-square">
   <img alt="APX" src="https://img.shields.io/badge/APX-framework-FF3621?style=flat-square">
@@ -37,6 +38,7 @@
   <img alt="TypeScript 5.9" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white">
   <img alt="Vite 8" src="https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white">
   <img alt="TanStack Router + Query" src="https://img.shields.io/badge/TanStack-Router%20%2B%20Query-FF4154?style=flat-square&logo=reactquery&logoColor=white">
+  <img alt="Apollo Client" src="https://img.shields.io/badge/Apollo%20Client-GraphQL-311C87?style=flat-square&logo=apollographql&logoColor=white">
   <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white">
   <img alt="shadcn/ui" src="https://img.shields.io/badge/shadcn%2Fui-components-000000?style=flat-square&logo=shadcnui&logoColor=white">
   <img alt="bun" src="https://img.shields.io/badge/bun-toolchain-000000?style=flat-square&logo=bun&logoColor=white">
@@ -56,14 +58,16 @@ The demo domain is healthcare: six backend services that loosely follow HL7 FHIR
 
 ```
 Browser  →  hc-portal (frontend + BFF)  →  6 backend services  →  6 Lakebase databases
-            └── joins in-memory             └── one DB per service, no shared schema
+            └── REST /api/bff/...           └── one DB per service, no shared schema
+            └── GraphQL /api/graphql        └── each exposes /api/graphql (Strawberry)
             └── forwards OBO token
 ```
 
-- **6 backend services** (`patient`, `provider`, `appointment`, `lab`, `prescription`, `billing`), each its own Databricks App with its own Lakebase project.
-- **1 frontend** (`hc-portal`) — a [BFF](https://samnewman.io/patterns/architectural/bff/) that orchestrates calls and joins data in-memory. Holds no data of its own.
+- **6 backend services** (`patient`, `provider`, `appointment`, `lab`, `prescription`, `billing`), each its own Databricks App with its own Lakebase project. Each exposes both REST (`/api/v1/`) and GraphQL (`/api/graphql`) endpoints via Strawberry.
+- **1 frontend** (`hc-portal`) — a [BFF](https://samnewman.io/patterns/architectural/bff/) that orchestrates calls and joins data in-memory. Holds no data of its own. Exposes a **GraphQL gateway** at `/api/graphql` with DataLoader-based batch resolution and nested cross-service traversal.
 - **OBO auth** end-to-end. Every Postgres connection is opened with the calling user's OAuth credential, so Unity Catalog enforces access at the data layer.
 - **No backend-to-backend calls.** The BFF is the only place where data from multiple services is joined.
+- **Dual API surface.** REST endpoints remain stable; GraphQL coexists and enables field selection, nested traversal, and partial-failure handling natively. The frontend is being migrated page-by-page from React Query (REST) to Apollo Client (GraphQL).
 
 Detailed architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md). Data model: [`HEALTHCARE_DATA_MODEL.md`](HEALTHCARE_DATA_MODEL.md). Implementation plan: [`ROADMAP.md`](ROADMAP.md). Brand assets: [`docs/brand/`](docs/brand/README.md).
 
@@ -172,13 +176,13 @@ See `CONTRIBUTING.md` "Running CI locally" for the full reference. Every step ca
 ├── services/                       # 6 backend microservices (one APX project each)
 │   ├── patient/                    # ✅ all six scaffolded; auth.py / db.py / migrations
 │   ├── provider/                   #     are byte-identical except for entity names
-│   ├── appointment/
+│   ├── appointment/                #     each exposes REST + GraphQL (Strawberry)
 │   ├── lab/
 │   ├── prescription/
 │   └── billing/
 ├── frontend/
-│   └── hc-portal/                  # ✅ React UI + BFF; aggregates patient summary
-│                                   #     across all six services with concurrent fan-out
+│   └── hc-portal/                  # ✅ React UI + BFF; REST aggregation + GraphQL
+│                                   #     gateway with DataLoaders + Apollo Client
 ├── scripts/
 │   ├── ci-local.sh                 # Local CI emulator — pr-validate / pr-cleanup /
 │   │                               #     deploy {dev,test,prod} / nightly-cleanup
@@ -223,6 +227,7 @@ The repo ships six project-local skills under `.claude/skills/`. Each one codifi
 | "Add a new route to the patient service"                    | `hc-obo-auth`              |
 | "Deploy to test"                                            | `hc-dab-deployment`        |
 | "Add a BFF endpoint that joins patient + appointment"       | `hc-bff-pattern`           |
+| "Add a GraphQL query / migrate a page to GraphQL"           | `hc-graphql`               |
 | "Cut a release / open a PR"                                 | `hc-gitflow-cicd`          |
 
 
