@@ -38,7 +38,7 @@ jobs:
       - name: Add 404 fallback for SPA routing
         run: cp frontend/microbricks-deck/dist/index.html frontend/microbricks-deck/dist/404.html
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: frontend/microbricks-deck/dist
 
