@@ -76,7 +76,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - name: uv sync
         working-directory: services/${{ matrix.service }}
         run: uv sync --all-groups
@@ -96,7 +96,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - name: uv sync (BFF)
         working-directory: frontend/${{ matrix.frontend }}
         run: uv sync --all-groups
@@ -122,7 +122,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - uses: databricks/setup-cli@main
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}

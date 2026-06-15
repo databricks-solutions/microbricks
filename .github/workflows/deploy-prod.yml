@@ -95,7 +95,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - uses: databricks/setup-cli@main
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
@@ -344,7 +344,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
       - uses: databricks/setup-cli@main
         with:
           version: ${{ env.DATABRICKS_CLI_VERSION }}
