@@ -17,7 +17,7 @@ export default defineConfig(({ command }) => ({
   ],
   root: "src/microbricks_deck/ui",
   publicDir: "public",
-  base: command === "build" ? "/microbricks/" : "/",
+  base: command === "build" ? "/microbricks/deck/" : "/",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src/microbricks_deck/ui"),
