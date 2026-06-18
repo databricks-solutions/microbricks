@@ -4,6 +4,9 @@ version = "0.0.0"
 description = "Reference architecture: 6 backend services + BFF on Databricks Apps + Lakebase."
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "cryptography>=48.0.1",
+]
 
 [tool.uv]
 # Root is a non-package uv project: it exists only to drive the cross-service
