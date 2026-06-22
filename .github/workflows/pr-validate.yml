@@ -635,7 +635,7 @@ jobs:
           PY
 
       - name: Comment preview URLs on PR
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           URLS_JSON: ${{ steps.urls.outputs.map }}
           CHANGED_APP_NAMES: ${{ steps.changed-apps.outputs.names }}
