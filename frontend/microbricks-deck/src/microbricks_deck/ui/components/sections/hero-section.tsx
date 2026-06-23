@@ -16,7 +16,7 @@ export function HeroSection() {
         className="relative z-10 text-center"
       >
         <motion.img
-          src="/logo-full.png"
+          src={`${import.meta.env.BASE_URL}logo-full.png`}
           alt="microbricks — powered by databricks"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
