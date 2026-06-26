@@ -145,7 +145,7 @@ jobs:
 
       - name: uv sync (service)
         working-directory: services/${{ matrix.service }}
-        run: uv sync --all-groups
+        run: uv sync --frozen --all-groups
 
       - name: Lint
         working-directory: services/${{ matrix.service }}
@@ -184,7 +184,7 @@ jobs:
 
       - name: uv sync (BFF)
         working-directory: frontend/${{ matrix.frontend }}
-        run: uv sync --all-groups
+        run: uv sync --frozen --all-groups
 
       - name: BFF unit tests
         working-directory: frontend/${{ matrix.frontend }}
@@ -326,7 +326,7 @@ jobs:
             export PGUSER=$(databricks current-user me -p "$DB_PROFILE" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["userName"])')
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
-            uv sync --all-groups
+            uv sync --frozen --all-groups
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
           done
@@ -342,10 +342,9 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
 
       - name: Install apx CLI
-        run: |
-          set -euo pipefail
-          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh -s -- --version v0.3.8
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-apx
+        with:
+          version: v0.3.8
 
       - name: Build all frontend UIs
         run: ./scripts/build-frontends.sh
@@ -565,7 +564,7 @@ jobs:
           # so requests route to the PR's Lakebase branch
           export LAKEBASE_BRANCH="$SLUG"
 
-          uv sync --all-groups
+          uv sync --frozen --all-groups
           uv run pytest tests/e2e/ -m "e2e" -v --tb=short
 
       - name: Install Playwright browsers

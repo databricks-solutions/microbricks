@@ -158,7 +158,7 @@ jobs:
             export PGDATABASE=databricks_postgres
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
-            uv sync --all-groups
+            uv sync --frozen --all-groups
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
           done
@@ -174,10 +174,9 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
 
       - name: Install apx CLI
-        run: |
-          set -euo pipefail
-          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh -s -- --version v0.3.8
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-apx
+        with:
+          version: v0.3.8
 
       - name: Build all frontend UIs
         run: ./scripts/build-frontends.sh
@@ -389,7 +388,7 @@ jobs:
             export PGDATABASE=databricks_postgres
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
-            uv sync --all-groups
+            uv sync --frozen --all-groups
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
           done
@@ -411,10 +410,9 @@ jobs:
           path: frontend/
 
       - name: Install apx CLI
-        run: |
-          set -euo pipefail
-          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh -s -- --version v0.3.8
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-apx
+        with:
+          version: v0.3.8
 
       - name: bundle deploy
         run: databricks bundle deploy -t prod

@@ -1,0 +1,41 @@
+name: "Setup apx CLI"
+description: "Download and verify the apx CLI binary with SHA-256 checksum"
+
+inputs:
+  version:
+    description: "apx release version (e.g. v0.3.8)"
+    required: true
+    default: "v0.3.8"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download and verify apx
+      shell: bash
+      env:
+        APX_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        INSTALL_DIR="$HOME/.local/bin"
+        mkdir -p "$INSTALL_DIR"
+
+        BASE_URL="https://github.com/databricks-solutions/apx/releases/download/${APX_VERSION}"
+        ARCHIVE="apx-${APX_VERSION}-linux-amd64.tar.gz"
+        CHECKSUMS="checksums.txt"
+
+        echo "→ Downloading apx ${APX_VERSION}..."
+        curl -fsSL -o "/tmp/$ARCHIVE" "${BASE_URL}/${ARCHIVE}"
+        curl -fsSL -o "/tmp/$CHECKSUMS" "${BASE_URL}/${CHECKSUMS}"
+
+        echo "→ Verifying SHA-256 checksum..."
+        cd /tmp
+        grep "$ARCHIVE" "$CHECKSUMS" | sha256sum --check --strict
+        echo "✓ Checksum verified"
+
+        echo "→ Installing..."
+        tar xzf "$ARCHIVE" -C "$INSTALL_DIR"
+        chmod +x "$INSTALL_DIR/apx"
+        rm -f "$ARCHIVE" "$CHECKSUMS"
+
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        echo "✓ apx ${APX_VERSION} installed to $INSTALL_DIR"

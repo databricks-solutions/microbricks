@@ -68,7 +68,7 @@ PIDS=()
 for proj in "${PROJECTS[@]}"; do
   echo "▶ Building UI for $proj (background)"
   (
-    cd "$proj" && apx frontend build
+    cd "$proj" && bun install --frozen-lockfile && apx frontend build
   ) > "$LOG_DIR/${proj##*/}.log" 2>&1 &
   PIDS+=("$!")
 done

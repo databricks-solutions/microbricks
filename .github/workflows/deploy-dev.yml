@@ -79,7 +79,7 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: uv sync
         working-directory: services/${{ matrix.service }}
-        run: uv sync --all-groups
+        run: uv sync --frozen --all-groups
       - name: Unit tests
         working-directory: services/${{ matrix.service }}
         run: uv run pytest -m 'not integration' -q
@@ -99,7 +99,7 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: uv sync (BFF)
         working-directory: frontend/${{ matrix.frontend }}
-        run: uv sync --all-groups
+        run: uv sync --frozen --all-groups
       - name: BFF unit tests
         working-directory: frontend/${{ matrix.frontend }}
         run: |
@@ -167,7 +167,7 @@ jobs:
             export PGDATABASE=databricks_postgres
             export PGSSLMODE=require
             export ENDPOINT_NAME="$ENDPOINT"
-            uv sync --all-groups
+            uv sync --frozen --all-groups
             uv run alembic upgrade head
             cd "$GITHUB_WORKSPACE"
           done
@@ -183,10 +183,9 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
 
       - name: Install apx CLI
-        run: |
-          set -euo pipefail
-          curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh -s -- --version v0.3.8
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-apx
+        with:
+          version: v0.3.8
 
       - name: Build all frontend UIs
         run: ./scripts/build-frontends.sh
