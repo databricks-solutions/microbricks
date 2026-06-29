@@ -19,7 +19,7 @@
         "clsx": "2.1.1",
         "graphql": "^17.0.0",
         "lucide-react": "^1.17.0",
-        "motion": "12.40.0",
+        "motion": "12.42.0",
         "react": "19.2.7",
         "react-dom": "19.2.7",
         "react-error-boundary": "6.1.2",
