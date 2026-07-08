@@ -32,8 +32,6 @@ concurrency:
 env:
   DATABRICKS_CLI_VERSION: "1.2.1"
   DATABRICKS_HOST: ${{ github.event.pull_request.base.ref == 'develop' && vars.DATABRICKS_HOST_DEV || vars.DATABRICKS_HOST_TEST }}
-  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -205,6 +203,9 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.detect-changes.outputs.deploy_env }}
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -251,6 +252,9 @@ jobs:
     environment:
       name: ${{ needs.detect-changes.outputs.deploy_env }}
       url: ${{ steps.urls.outputs.portal_url }}
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
