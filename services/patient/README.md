@@ -1,4 +1,4 @@
-# patient-svc
+# PATIENT-SVC
 
 System of record for patient demographics, addresses, and consent.
 
@@ -75,3 +75,4 @@ make seed-dev                        # all six services in dependency order
 with `~50` deterministic synthetic rows. Re-running is safe (`ON CONFLICT
 (id) DO NOTHING`). See [`scripts/seeds/_common.py`](../../scripts/seeds/_common.py)
 for the shared helpers + cross-service ID derivation.
+
