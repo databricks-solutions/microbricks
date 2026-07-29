@@ -14,28 +14,40 @@ runs:
       shell: bash
       env:
         APX_VERSION: ${{ inputs.version }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         INSTALL_DIR="$HOME/.local/bin"
         mkdir -p "$INSTALL_DIR"
 
+        # Match official install.sh asset naming: apx-${ARCH}-${PLATFORM}
+        case "$(uname -m)" in
+          x86_64|amd64) ARCH="x86_64" ;;
+          aarch64|arm64) ARCH="aarch64" ;;
+          *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        BINARY="apx-${ARCH}-linux"
         BASE_URL="https://github.com/databricks-solutions/apx/releases/download/${APX_VERSION}"
-        ARCHIVE="apx-${APX_VERSION}-linux-amd64.tar.gz"
-        CHECKSUMS="checksums.txt"
 
-        echo "→ Downloading apx ${APX_VERSION}..."
-        curl -fsSL -o "/tmp/$ARCHIVE" "${BASE_URL}/${ARCHIVE}"
-        curl -fsSL -o "/tmp/$CHECKSUMS" "${BASE_URL}/${CHECKSUMS}"
+        echo "→ Downloading apx ${APX_VERSION} (${BINARY})..."
+        curl -fsSL -o "/tmp/apx" "${BASE_URL}/${BINARY}"
 
-        echo "→ Verifying SHA-256 checksum..."
-        cd /tmp
-        grep "$ARCHIVE" "$CHECKSUMS" | sha256sum --check --strict
+        echo "→ Verifying SHA-256 checksum via GitHub API..."
+        EXPECTED="$(curl -fsSL \
+          -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "https://api.github.com/repos/databricks-solutions/apx/releases/tags/${APX_VERSION}" \
+          | BINARY="$BINARY" python3 -c 'import json, os, sys; asset = next(a for a in json.load(sys.stdin)["assets"] if a["name"] == os.environ["BINARY"]); digest = asset.get("digest") or ""; assert digest.startswith("sha256:"), f"missing digest for {os.environ['"'"'BINARY'"'"']}"; print(digest.removeprefix("sha256:"))')"
+        ACTUAL="$(sha256sum /tmp/apx | awk '{print $1}')"
+        if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+          echo "Checksum mismatch: expected $EXPECTED, got $ACTUAL" >&2
+          exit 1
+        fi
         echo "✓ Checksum verified"
 
         echo "→ Installing..."
-        tar xzf "$ARCHIVE" -C "$INSTALL_DIR"
+        mv /tmp/apx "$INSTALL_DIR/apx"
         chmod +x "$INSTALL_DIR/apx"
-        rm -f "$ARCHIVE" "$CHECKSUMS"
 
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
         echo "✓ apx ${APX_VERSION} installed to $INSTALL_DIR"
