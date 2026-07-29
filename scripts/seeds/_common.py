@@ -145,8 +145,7 @@ def connect() -> Iterator[psycopg.Connection]:
       2) DATABRICKS_TOKEN — picked up by the SDK's default auth chain
       3) Default `WorkspaceClient()` config (profile, OIDC, etc.)
     """
-    host = os.environ["PGHOST"]
-    user = os.environ["PGUSER"]
+    user = os.environ.get("PGUSER", "users")
     port = os.environ.get("PGPORT", "5432")
     dbname = os.environ.get("PGDATABASE", "databricks_postgres")
     sslmode = os.environ.get("PGSSLMODE", "require")
@@ -160,6 +159,8 @@ def connect() -> Iterator[psycopg.Connection]:
         ws = WorkspaceClient()
 
     cred = ws.postgres.generate_database_credential(endpoint=endpoint)
+    endpoint_info = ws.postgres.get_endpoint(endpoint)
+    host = endpoint_info.status.hosts.host
 
     conn = psycopg.connect(
         host=host,
